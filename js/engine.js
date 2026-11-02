@@ -347,14 +347,14 @@ function whDay(d) {
 }
 // Спидометр: каждые 2000 пиков — бонус, и он растёт: 200, 400, 600…
 const speedBonus = picks => { const n = Math.floor(picks / 2000); return 100 * n * (n + 1); };
-function shiftPay(role, good, d) {
-  const picks = good * WH.roles[role].ppc, base = Math.round(picks * d.coef), bonus = speedBonus(picks);
+function shiftPay(ppc, good, d) {
+  const picks = good * ppc, base = Math.round(picks * d.coef), bonus = speedBonus(picks);
   return { picks, base, bonus, total: base + bonus };
 }
-function finishShift(role, res) {
+function finishShift(title, res) {
   S.money += res.total;
   S.wh.last = S.day; S.wh.shifts++; S.wh.earned += res.total; S.wh.best = Math.max(S.wh.best, res.total);
-  addLog('Смена на ' + WH.name + ' (' + WH.roles[role].n.toLowerCase() + '): ' + res.picks + ' пиков, ' + money(res.total) + '.');
+  addLog('Смена на ' + WH.name + ' (' + title + '): ' + res.picks + ' пиков, ' + money(res.total) + '.');
 }
 
 function wash(g) { if (!canPay(PRICES.wash)) return 'Не хватает денег'; pay(PRICES.wash); g.spent += PRICES.wash; g.car.clean = true; return null; }

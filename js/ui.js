@@ -41,7 +41,7 @@ const I = {
 const BODY_NAMES = { sedan: 'седан', hatch: 'хэтчбек', wagon: 'универсал', suv: 'внедорожник', suvc: 'кроссовер-купе', box: 'внедорожник',
   coupe: 'купе', super: 'купе', pickup: 'пикап', van: 'фургон', old: 'седан', micro: 'хэтчбек', moto: 'мотоцикл' };
 
-const UI = { tab: 'ads', f: { cls: '', brand: '', max: 0, sort: 'new' }, page: null, modal: null, offerPct: {}, sellPct: 100 };
+const UI = { whLetter: 'A', tab: 'ads', f: { cls: '', brand: '', max: 0, sort: 'new' }, page: null, modal: null, offerPct: {}, sellPct: 100 };
 const tgApp = window.Telegram && window.Telegram.WebApp;
 const hasTg = !!(tgApp && tgApp.initData !== undefined && tgApp.platform && tgApp.platform !== 'unknown');
 
@@ -58,6 +58,12 @@ function toast(t, err) {
   clearTimeout(toast.t); toast.t = setTimeout(() => el.innerHTML = '', 2400);
 }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+function personAva(name, lg) {
+  let h = 0; for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  const letter = String(name).replace(/^[^A-Za-zА-Яа-яЁё]+/, '')[0] || '?';
+  return `<div class="avatar ${lg ? 'lg' : ''}" style="background:hsl(${h},38%,38%)">${esc(letter.toUpperCase())}</div>`;
+}
+const specLine = (c, md) => [md.body === 'moto' ? Math.round(c.kmShown / 1000) + ' тыс. км' : km(c.kmShown), md.engine + ' (' + md.hp + ' л.с.)', BODY_NAMES[md.body]].join(' · ');
 function daysAgo(d) { const n = S.day - d; return n <= 0 ? 'сегодня' : n === 1 ? 'вчера' : n + ' ' + plural(n, 'день', 'дня', 'дней') + ' назад'; }
 
 // ---------- общий рендер ----------
@@ -73,7 +79,8 @@ function commit() { save(); render(); }
 
 function renderTop() {
   $('#top').innerHTML = `
-    <div class="pill money"><div class="ic">${I.rub}</div><span>${money(S.money)}</span></div>
+    <button class="me-mini" data-a="tab" data-k="me" aria-label="Профиль">${avatarSvg(S.me, true)}</button>
+    <div class="pill money"><div class="ic">${I.rub}</div><span>${Math.abs(S.money) >= 1e6 ? (S.money < 0 ? '−' : '') + (Math.abs(S.money) / 1e6).toFixed(2).replace('.', ',') + ' млн ₽' : money(S.money)}</span></div>
     <div class="pill rep"><div class="ic">${I.star}</div><span>${S.rep}</span></div>
     <button class="daybtn" data-a="day">${I.sun}<span>День ${S.day}</span>›</button>`;
 }
@@ -112,17 +119,20 @@ function viewAds() {
 function adCard(l) {
   const c = l.car, md = MODELS[c.m];
   const est = flipEstimate(c), profit = Math.round((est.sell - est.repair - (l.deal || l.ask)) / 1000) * 1000;
-  const tags = [`<span class="tag">${I.gauge}${Math.round(c.kmShown / 1000)} тыс.</span>`, `<span class="tag">${I.cal}${c.year}</span>`];
-  if (l.urgent) tags.unshift('<span class="tag hot">СРОЧНО</span>');
-  if (l.deal) tags.unshift('<span class="tag ok">Договорились</span>');
+  const tags = [];
+  if (l.urgent) tags.push('<span class="tag hot">Срочно</span>');
+  if (l.deal) tags.push('<span class="tag ok">Договорились</span>');
+  const price = l.deal || l.ask;
   return `<div class="card ${l.gone && !l.deal ? 'dim' : ''}" data-a="ad" data-id="${l.id}">
     <div class="${sceneClass(c)}"><div class="tags">${tags.join('')}</div>${carPic(c)}</div>
-    <div class="side">
-      <div class="plate beige"><small>Цена</small><b>${money(l.deal || l.ask)}</b></div>
-      <div class="plate ${profit > 0 ? 'green' : 'red'}"><small>Навар ~</small><b>${profit > 0 ? '+' : ''}${money(profit)}</b></div>
-      <button class="btn small" data-a="call" data-id="${l.id}">${I.phone}Звонок</button>
+    <div class="info">
+      <div class="price">${money(price)}${price < l.ask0 ? `<s>${money(l.ask0)}</s>` : ''}</div>
+      <div class="ttl">${esc(md.brand + ' ' + md.name)}, ${c.year}</div>
+      <div class="meta">${specLine(c, md)}</div>
+      <div class="meta">${esc(l.city)} · ${daysAgo(l.posted)}</div>
+      <div class="act"><div class="chip ${profit > 0 ? 'green' : 'red'}">Навар ~ ${profit > 0 ? '+' : ''}${money(profit)}</div>
+        <button class="btn small" data-a="call" data-id="${l.id}">${I.phone}Позвонить</button></div>
     </div>
-    <div class="name"><b>${esc(md.brand + ' ' + md.name)}</b><span>${esc(l.city)} · ${daysAgo(l.posted)}</span></div>
   </div>`;
 }
 
@@ -138,13 +148,13 @@ function pageListing(l) {
   const insp = inspectPrice(l);
   return `
   <button class="back" data-a="close">${I.back}Объявления</button>
-  <div class="${sceneClass(c)}"><div class="tags">${l.urgent ? '<span class="tag hot">СРОЧНО</span>' : ''}<span class="tag">${I.eye}${40 + (l.id * 37) % 800 + (S.day - l.posted) * 23}</span></div>${carPic(c)}</div>
+  <div class="${sceneClass(c)}"><div class="tags">${l.urgent ? '<span class="tag hot">Срочно</span>' : ''}<span class="tag">${I.eye}${40 + (l.id * 37) % 800 + (S.day - l.posted) * 23}</span></div>${carPic(c)}</div>
   <div class="big-title">${esc(md.brand + ' ' + md.name)}, ${c.year}</div>
   <div class="row" style="justify-content:space-between">
     <div class="price-big">${money(price)}</div>
     ${price < l.ask0 ? `<div class="sub" style="text-decoration:line-through">${money(l.ask0)}</div>` : ''}
   </div>
-  <div class="sub">${esc(l.city)} · ${daysAgo(l.posted)} · ${st.face} ${esc(l.sname)}</div>
+  <div class="sub">${esc(l.city)} · ${daysAgo(l.posted)} · продаёт ${esc(l.sname)}</div>
   <div class="panel flat">
     <dl class="specs">
       <dt>Пробег</dt>${kmLine}
@@ -267,19 +277,17 @@ function modalCall(m) {
         <button class="btn green" data-a="offer" data-id="${l.id}">${I.check}Предложить</button>
         <button class="btn dark" data-a="cash" data-id="${l.id}" ${l.cash ? 'disabled' : ''}>${I.cash}Наличка сразу</button>
       </div>
-      <div class="note">Терпение продавца: ${'❤️'.repeat(Math.max(0, l.patience))}${'🖤'.repeat(Math.max(0, st.patience - l.patience))}</div>
+      <div class="note" style="text-align:center">Терпение продавца: <span class="hearts">${'<b style="color:var(--y)">●</b>'.repeat(Math.max(0, l.patience))}${'<b style="color:#3a4b5e">●</b>'.repeat(Math.max(0, st.patience - l.patience))}</span></div>
     </div>`;
   return `<div class="panel"><button class="x" data-a="mclose">${I.x}</button>
-    <div class="title-plate h">Звонок продавцу</div>
-    <div class="sub" style="text-align:center;margin:-4px 0 10px">${esc(md.brand + ' ' + md.name)}, ${c.year}</div>
-    <div class="seller"><div class="chat" id="chat">${l.chat.map(x => `<div class="bub ${x.w}">${esc(x.t)}</div>`).join('')}</div>
-      <div class="ava"><small>${esc(l.sname.split(' ')[0])}</small>${st.face}</div></div>
+    <div class="callhead">${personAva(l.sname, true)}<div><b>${esc(l.sname)}</b><span class="sub">${esc(md.brand + ' ' + md.name)}, ${c.year} · звонок</span></div></div>
+    <div class="chat" id="chat">${l.chat.map(x => `<div class="bub ${x.w}">${esc(x.t)}</div>`).join('')}</div>
     <div class="grid2" style="margin:12px 0">
       <div class="plate blue"><small>Скидка</small><b>${disc}%</b></div>
       <div class="plate ${profit > 0 ? 'green' : 'red'}"><small>Возможный доход</small><b>${profit > 0 ? '+' : ''}${money(profit)}</b></div>
     </div>
     <div class="panel flat" style="margin:8px 0 12px;padding:10px">
-      <div class="h" style="text-align:center;font-size:12px;margin-bottom:8px">Найденные проблемы</div>
+      <div class="h" style="font-size:13px;margin-bottom:8px">Найденные проблемы</div>
       ${iss.length ? `<div class="issues">${iss.map(x => `<button class="issue ${l.pointed.includes(x.id) ? 'used' : ''}" data-a="point" data-id="${l.id}" data-k="${x.id}"><i>${I[x.icon] || I.wrench}</i>${x.n}</button>`).join('')}</div>
         <div class="note">Жми на проблему — предъяви её продавцу и выбей скидку.</div>`
       : `<div class="empty-issues">Нечего предъявить. Проверь машину: автотека, базы, подборщик.</div>`}
@@ -311,19 +319,22 @@ function viewGarage() {
 function garageCard(g) {
   const c = g.car, md = MODELS[c.m];
   const mp = marketPrice(g), profit = mp - g.paid - g.spent;
-  const tags = [`<span class="tag">${I.gauge}${Math.round(c.kmShown / 1000)} тыс.</span>`, `<span class="tag">${I.cal}${c.year}</span>`];
-  if (g.sale) tags.unshift(`<span class="tag ok">На продаже</span>`);
+  const tags = [];
+  if (g.sale) tags.push(`<span class="tag ok">На продаже</span>`);
   if (c.legal.zalog || c.legal.limit) tags.push('<span class="tag hot">Документы!</span>');
   if (c.twisted) tags.push('<span class="tag hot">Скручен</span>');
   if ((g.orders || []).length) tags.push('<span class="tag">📦 Запчасть едет</span>');
   return `<div class="card mine" data-a="car" data-uid="${c.uid}">
     <div class="${sceneClass(c)}"><div class="tags">${tags.join('')}</div>${carPic(c)}</div>
-    <div class="side">
-      <div class="plate beige"><small>Вложено</small><b>${money(g.paid + g.spent)}</b></div>
-      <div class="plate ${profit > 0 ? 'green' : 'red'}"><small>Рынок ~</small><b>${money(mp)}</b></div>
-      <button class="btn small green" data-a="car" data-uid="${c.uid}">${I.wrench}Открыть</button>
+    <div class="info">
+      <div class="ttl" style="font-weight:600">${esc(md.brand + ' ' + md.name)}, ${c.year}</div>
+      <div class="meta">${specLine(c, md)} · ${g.sale ? g.offers.filter(o => !o.caught).length + ' предлож.' : 'в гараже ' + (S.day - g.boughtDay + 1) + ' дн.'}</div>
+      <div class="grid2" style="margin-top:8px">
+        <div class="plate beige"><small>Вложено</small><b>${money(g.paid + g.spent)}</b></div>
+        <div class="plate ${profit > 0 ? 'green' : 'red'}"><small>Рынок ~</small><b>${money(mp)}</b></div>
+      </div>
+      <button class="btn block small green" style="margin-top:8px" data-a="car" data-uid="${c.uid}">${I.wrench}Открыть</button>
     </div>
-    <div class="name"><b>${esc(md.brand + ' ' + md.name)}</b><span>${g.sale ? g.offers.filter(o => !o.caught).length + ' предлож.' : 'в гараже ' + (S.day - g.boughtDay + 1) + ' дн.'}</span></div>
   </div>`;
 }
 
@@ -343,11 +354,11 @@ function pageCar(g) {
   const L = c.legal;
   return `
   <button class="back" data-a="close">${I.back}Гараж</button>
-  <div class="panel" style="margin-top:30px"><div class="title-plate h">Ремонт автомобиля</div>
-    <div style="text-align:center;font-weight:800;margin-bottom:8px">${esc(md.brand + ' ' + md.name)}, ${c.year} · ${km(c.kmShown)}</div>
+  <div class="${sceneClass(c)}">${carPic(c)}</div>
+  <div class="big-title">${esc(md.brand + ' ' + md.name)}, ${c.year}</div><div class="sub">${specLine(c, md)}</div>
+  <div class="panel"><div class="title-plate h">Ремонт</div>
     <div class="repair">${PARTS.slice(0, 3).map(tile).join('')}</div>
-    <div class="mid-scene ${sceneClass(c)}">${carPic(c)}</div>
-    <div class="repair">${PARTS.slice(3).map(tile).join('')}</div>
+    <div class="repair" style="margin-top:8px">${PARTS.slice(3).map(tile).join('')}</div>
     ${!k.insp ? `<button class="btn block" style="margin-top:12px" data-a="inspect" data-uid="${c.uid}">${I.eye}Осмотреть машину (бесплатно)</button>` : ''}
     <div class="grid3" style="margin-top:12px">
       <div class="plate blue"><small>Купил за</small><b>${money(g.paid)}</b></div>
@@ -435,9 +446,9 @@ function saleBlock(g) {
   </div>`;
 }
 function offerCard(g, o) {
-  if (o.caught) return `<div class="offer bad"><div class="face">${o.face}</div><div><div class="who">${esc(o.name)}</div><p>${esc(o.text)}</p>
+  if (o.caught) return `<div class="offer bad">${personAva(o.name)}<div><div class="who">${esc(o.name)}</div><p>${esc(o.text)}</p>
     <button class="btn small gray" data-a="dismiss" data-uid="${g.car.uid}" data-o="${o.id}">Ну и ладно</button></div></div>`;
-  return `<div class="offer"><div class="face">${o.face}</div><div>
+  return `<div class="offer">${personAva(o.name)}<div>
     <div class="who">${esc(o.name)}<b>${money(o.offer)}</b></div><p>${esc(o.text)}</p>
     <div class="row">
       <button class="btn green" data-a="accept" data-uid="${g.car.uid}" data-o="${o.id}">Продать</button>
@@ -449,12 +460,13 @@ function modalCounter(m) {
   const g = m.g, o = m.o, lo = o.offer, hi = Math.max(g.sale.price, lo + 1000);
   if (UI.counterX == null) UI.counterX = roundPrice((lo + hi) / 2);
   return `<div class="panel"><button class="x" data-a="mclose">${I.x}</button><div class="title-plate h">Торг с покупателем</div>
-    <div class="seller" style="align-items:center"><div class="chat"><div class="bub s" style="background:linear-gradient(#3e5a78,#2a4058)">${esc(o.text)}</div></div><div class="ava">${o.face}</div></div>
+    <div class="callhead">${personAva(o.name, true)}<div><b>${esc(o.name)}</b><span class="sub">покупатель</span></div></div>
+    <div class="chat"><div class="bub s">${esc(o.text)}</div></div>
     <div class="offer-box" style="margin-top:10px">
       <div class="sub" style="text-align:center">Ваша цена</div>
       <div class="val" id="cntv">${money(UI.counterX)}</div>
       <input type="range" min="${lo}" max="${hi}" step="1000" value="${UI.counterX}" data-a="cntx">
-      <div class="note">У покупателя терпение: ${'❤️'.repeat(o.patience)}</div>
+      <div class="note" style="text-align:center">Терпение покупателя: <span class="hearts">${'<b style="color:var(--y)">●</b>'.repeat(o.patience)}</span></div>
       <button class="btn block green" data-a="docounter">${I.check}Предложить</button>
     </div></div>`;
 }
@@ -462,9 +474,9 @@ function modalCounter(m) {
 // ---------- профиль ----------
 function viewMe() {
   const lv = level(), pr = lv.next ? (S.stats.profit - lv.cur) / (lv.next - lv.cur) : 1;
-  const face = ['🧢', '😏', '😎', '🕵️', '🤑', '👑', '🦈'][lv.i];
-  return `<div class="panel" style="margin-top:28px"><div class="title-plate h">Личное дело</div>
-    <div class="dossier"><div class="ava"><small>Перекуп</small>${face}</div>
+  return `<div class="screen-title">${esc(meName())}</div>
+  <div class="panel">
+    <div class="dossier"><button class="me-big" data-a="avatar">${avatarSvg(S.me)}</button>
       <div><div class="kv"><span>Уровень</span><b class="g">${lv.title}</b></div>
         ${lv.next ? `<div class="kv"><span>До следующего</span><b>${money(lv.next - S.stats.profit)}</b></div><div class="progress"><i style="width:${clamp(pr, 0, 1) * 100}%"></i></div>` : '<div class="kv"><span>Ты на вершине</span><b>🏆</b></div>'}
         <div class="kv"><span>Репутация</span><b>${S.rep}/100</b></div><div class="progress"><i style="width:${S.rep}%;background:linear-gradient(90deg,#f6c21c,#ffe36b)"></i></div></div>
@@ -481,8 +493,9 @@ function viewMe() {
   <div class="panel flat"><div class="h" style="font-size:13px;margin-bottom:4px">Журнал</div>
     <div class="log">${S.log.slice(0, 25).map(x => `<div><span>Д${x.d}</span>${esc(x.t)}</div>`).join('')}</div></div>
   <div class="grid2"><button class="btn dark" data-a="help">${I.help}Как играть</button><button class="btn red" data-a="reset">Начать заново</button></div>
-  <button class="btn block dark" style="margin-top:10px" data-a="credits">📷 Фото машин</button>
-  <div class="note" style="margin-top:14px">Perekup 0.2 · прогресс сохраняется в Telegram</div>`;
+  <button class="btn block dark" style="margin-top:10px" data-a="avatar">${I.user}Изменить персонажа</button>
+  <button class="btn block dark" style="margin-top:10px" data-a="credits">Фото машин: авторы</button>
+  <div class="note" style="margin-top:14px;text-align:center">Perekup 0.3 · сохраняется сам: в Telegram и на телефоне</div>`;
 }
 function modalHelp() {
   return `<div class="panel"><button class="x" data-a="mclose">${I.x}</button><div class="title-plate h">Как стать перекупом</div>
@@ -494,7 +507,8 @@ function modalHelp() {
       <div>🏷️ <b>Продавай</b> на доске. Покупатели звонят по утрам — жми «День ›». Торгуйся с ними.</div>
       <div>☀️ Каждый день — аренда гаража. Объявления уходят: кто не успел, тот опоздал.</div>
       <div>😈 Можно скрутить пробег. Но если спалят — репутация в минус, и покупателей станет меньше.</div>
-      <div>📦 <b>Склад Ozon</b>: кончились деньги — выйди на смену на СЦ Волхонское. Ромашка или приёмка, коэффициент и спидометр как в жизни.</div>
+      <div>📦 <b>Склад Ozon</b>: кончились деньги — выйди на смену на СЦ Волхонское. Ромашка (буквы A–K), приёмка, аллея или грузчик. Коэффициент и спидометр как в жизни.</div>
+      <div>🧍 <b>Персонаж</b>: нажми на человечка слева сверху — имя, причёска, шмот.</div>
     </div>
     <button class="btn block" style="margin-top:12px" data-a="mclose">Погнали</button></div>`;
 }
@@ -532,7 +546,7 @@ function renderPage() {
 }
 function renderModal() {
   const m = UI.modal, el = $('#modal');
-  const fn = { report: modalReport, call: modalCall, fix: modalFix, sell: modalSell, counter: modalCounter, help: modalHelp, credits: modalCredits, day: modalDay, confirm: modalConfirm }[m.type];
+  const fn = { report: modalReport, call: modalCall, fix: modalFix, sell: modalSell, counter: modalCounter, help: modalHelp, credits: modalCredits, avatar: modalAvatar, day: modalDay, confirm: modalConfirm }[m.type];
   let sheet = el.querySelector('.sheet');
   const fresh = !sheet || el.dataset.type !== m.type;
   if (fresh) { el.innerHTML = '<div class="sheet"></div>'; sheet = el.querySelector('.sheet'); el.dataset.type = m.type; }
@@ -561,7 +575,7 @@ document.addEventListener('click', e => {
     case 'ad': UI.page = { type: 'ad', id }; hap('light'); render(); break;
     case 'car': UI.page = { type: 'car', uid }; hap('light'); render(); break;
     case 'close': closePage(); break;
-    case 'mclose': closeModal(); render(); break;
+    case 'mclose': { const wasHelp = UI.modal && UI.modal.type === 'help'; closeModal(); if (wasHelp && !S.me) openAvatar(); else render(); break; }
     case 'call': { const l = L(); if (l.gone && !l.deal) { toast('Продавец не берёт трубку', true); break; } openCall(l); break; }
     case 'check': doCheck(L(), t.dataset.w); break;
     case 'report': openReport(uid ? G().car : L().car, t.dataset.w); break;
@@ -579,6 +593,10 @@ document.addEventListener('click', e => {
     case 'dofix': { const err = repair(UI.modal.g, UI.modal.pk, t.dataset.diy === '1'); closeModal(); if (err) toast(err, err === 'Не хватает денег'); else { toast('Готово! 🔧'); hap('ok'); } commit(); break; }
     case 'ozonfix': { const err = orderOzon(UI.modal.g, UI.modal.pk); closeModal(); if (err) toast(err, true); else { toast('Заказал на Ozon 📦 Жди доставку'); hap('ok'); } commit(); break; }
     case 'credits': UI.modal = { type: 'credits' }; render(); break;
+    case 'avatar': openAvatar(); break;
+    case 'av': { const d = UI.modal.draft, k = t.dataset.k; d[k] = ['skin', 'hairC', 'topC'].includes(k) ? +t.dataset.v : t.dataset.v; hap('light');
+      $('#avprev').innerHTML = avatarSvg(d); t.parentNode.querySelectorAll('.on').forEach(x => x.classList.remove('on')); t.classList.add('on'); break; }
+    case 'avsave': { const d = UI.modal.draft; d.name = d.name.trim(); S.me = d; closeModal(); toast(d.name ? 'Здарова, ' + d.name + '!' : 'Персонаж сохранён'); hap('ok'); commit(); break; }
     case 'wash': { const err = wash(G()); err ? toast(err, true) : toast('Блестит как у кота яйца ✨'); commit(); break; }
     case 'twist': { const g = G(); confirmBox('Скрутить пробег?', `Сейчас ${km(g.car.kmShown)}. Станет примерно вдвое меньше. Если покупатель пробьёт автотеку — спалишься.`, 'Крутим', () => { const err = twist(g); err ? toast(err, true) : toast('Пробег: ' + km(g.car.kmShown) + ' 😈'); }, true); break; }
     case 'zalog': { const err = clearZalog(G()); err ? toast(err, true) : toast('Залог погашен'); commit(); break; }
@@ -616,6 +634,8 @@ document.addEventListener('input', e => {
     $('#offv').textContent = money(roundPrice(l.ask * t.value / 100));
   } else if (a === 'sellpct') {
     UI.sellPct = +t.value; renderModal();
+  } else if (a === 'avname') {
+    UI.modal.draft.name = t.value;
   } else if (a === 'cntx') {
     UI.counterX = +t.value; $('#cntv').textContent = money(UI.counterX);
   }
@@ -639,4 +659,5 @@ document.addEventListener('change', e => {
   await load();
   render();
   if (!S.seenHelp) { S.seenHelp = true; save(); UI.modal = { type: 'help' }; render(); }
+  else if (!S.me) openAvatar();
 })();

@@ -176,5 +176,6 @@ function carPic(car) {
   const ph = typeof PHOTOS !== 'undefined' && PHOTOS[car.m];
   if (!ph || !ph.length) return carSvg(car);
   const p = ph[(car.ph != null ? car.ph : car.uid) % ph.length];
-  return carSvg(car) + `<img class="photo ${car.wear && car.wear.body > 60 ? 'rough' : ''}" src="${p.u}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">`;
+  // пока фото грузится — нейтральный фон; нарисованная машина показывается, только если фото не загрузилось
+  return carSvg(car).replace('<svg class="car"', '<svg class="car fb"') + `<img class="photo ${car.wear && car.wear.body > 60 ? 'rough' : ''}" src="${p.u}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.previousElementSibling.classList.remove('fb');this.remove()">`;
 }

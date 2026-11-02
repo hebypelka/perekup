@@ -40,7 +40,7 @@ function newGame() {
   };
   for (let i = 0; i < 14; i++) S.listings.push(genListing(ri(0, 2)));
   S.up = {}; S.lots = []; refreshLots();
-  extrasInit();
+  extrasInit(); marketInit();
   addLog('Начал карьеру перекупа с ' + money(START_MONEY) + ' в кармане.');
 }
 
@@ -100,10 +100,10 @@ function buyerView(car, checked) {
     : { km: car.kmShown, wear: car.wear, acc: 0, owners: Math.min(car.owners, 2), taxi: false };
 }
 const up = k => (S && S.up && S.up[k]) || 0;
-function partMul(pk) { return (pk === 'body' && up('paint') ? 0.5 : 1) * (pk === 'electric' && up('scanner') ? 0.6 : 1); }
+function partMul(pk) { return (pk === 'body' && up('paint') ? 0.5 : 1) * (pk === 'electric' && up('scanner') ? 0.6 : 1) * (pk === 'suspension' && bizLv('tire') ? 0.8 : 1); }
 function repairCost(car, pk, diy) {
   const p = PARTS.find(x => x.k === pk);
-  return roundPrice((p.share * partBase(car) * car.wear[pk] / 100 * (diy ? 0.35 * (1 - 0.1 * up('tools')) : 0.85) + (diy ? 500 : 2500)) * partMul(pk));
+  return roundPrice((p.share * partBase(car) * car.wear[pk] / 100 * (diy ? 0.35 * (1 - 0.1 * up('tools')) : 0.85 * (bizLv('sto') ? 0.7 : 1)) + (diy ? 500 : 2500)) * partMul(pk));
 }
 
 // Примерно за сколько уйдёт, если сделать весь известный ремонт сервисом
@@ -329,7 +329,7 @@ function orderOzon(g, pk) {
   const cost = ozonCost(g.car, pk);
   if (!canPay(cost)) return 'Не хватает денег';
   pay(cost); g.spent += cost;
-  (g.orders = g.orders || []).push({ pk, at: S.day + ri(1, 3), wrong: chance(0.15) });
+  (g.orders = g.orders || []).push({ pk, at: S.day + (bizLv('pvz') ? 1 : ri(1, 3)), wrong: !bizLv('pvz') && chance(0.15) });
   return null;
 }
 const ordered = (g, pk) => (g.orders || []).find(o => o.pk === pk);
@@ -374,7 +374,7 @@ function finishShift(title, res) {
 }
 
 const diyFail = () => Math.max(0.015, 0.12 - 0.035 * up('tools'));
-const washPrice = () => up('wash') ? 500 : PRICES.wash;
+const washPrice = () => bizLv('wash') ? 0 : up('wash') ? 500 : PRICES.wash;
 function wash(g) { const p = washPrice(); if (!canPay(p)) return 'Не хватает денег'; pay(p); g.spent += p; g.car.clean = true; track('wash'); return null; }
 function upPrice(u) { const lv = up(u.k); return lv < u.price.length ? u.price[lv] : null; }
 function buyUpgrade(k) {
@@ -407,8 +407,9 @@ function marketPrice(g) {
 }
 function listForSale(g, price) { g.sale = { price: roundPrice(price), day: S.day }; g.offers = []; }
 function unlist(g) { g.sale = null; g.offers = []; }
+const quickPrice = car => roundPrice(trueValue(car) * (bizLv('razbor') ? 0.82 : 0.72));
 function quickSell(g) {
-  const p = roundPrice(trueValue(g.car) * 0.72);
+  const p = quickPrice(g.car);
   finishSale(g, p, 'перекупу на месте');
   return p;
 }
@@ -513,6 +514,7 @@ function nextDay() {
       return true;
     });
   }
+  marketDay(ev);
   extrasDay(ev);
   return ev;
 }
@@ -617,7 +619,7 @@ async function load() {
   if (!S.wh) S.wh = newWh();
   if (!S.up) S.up = {};
   if (!S.lots) { S.lots = []; refreshLots(); }
-  extrasInit();
+  extrasInit(); marketInit();
 }
 function resetGame() {
   try { localStorage.removeItem(SAVE_KEY); } catch (e) { }

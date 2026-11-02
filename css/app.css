@@ -390,3 +390,23 @@ input[type=range]::-moz-range-thumb { width: 22px; height: 22px; border-radius: 
 .ach.on { opacity: 1; box-shadow: inset 0 0 0 1px #f6c21c66; }
 .ach b { display: block; font-size: 13px; }
 .ach small { font-size: 11.5px; color: var(--muted); }
+
+/* 0.6: аукцион и бизнесы */
+.seg.three { grid-template-columns: 1fr 1.15fr 1fr; }
+.auc-status { text-align: center; font-weight: 800; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 12px 0 6px; }
+.auc-status.hot { color: #ff8a7a; animation: aucblink .5s ease-in-out infinite alternate; }
+@keyframes aucblink { to { opacity: .45; } }
+.auc-time { position: relative; height: 6px; border-radius: 3px; background: #0f1720; overflow: hidden; }
+.auc-time i { position: absolute; inset: 0 auto 0 0; background: var(--y); transition: width .1s linear; }
+.auc-price { text-align: center; font-size: 30px; font-weight: 800; margin: 10px 0 0; font-variant-numeric: tabular-nums; }
+.auc-lead { text-align: center; font-size: 13.5px; color: var(--muted); }
+.auc-lead.me { color: var(--green); font-weight: 700; }
+.auc-log { height: 150px; margin-top: 10px; }
+.auc .btn:disabled { opacity: .5; }
+.biz-ic { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; flex: none; background: var(--panel2); margin-right: 10px; }
+.biz.own .biz-ic { background: #8bd43a22; }
+.biz .lvl { font-size: 11px; color: var(--green); margin-left: 6px; font-weight: 700; }
+.biz .perk { font-size: 12.5px; color: var(--muted); margin: 8px 0 10px; }
+.biz .btn { white-space: nowrap; }
+.biz .btn.gray { flex: none; }
+@media (max-width: 400px) { #top { gap: 6px; } .pill { padding: 0 8px; gap: 4px; } .daybtn { padding: 0 10px; } .daybtn svg { display: none; } }

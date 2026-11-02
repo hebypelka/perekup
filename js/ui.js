@@ -85,7 +85,7 @@ function renderTabs() {
   const offers = S.garage.reduce((n, g) => n + (g.sale ? g.offers.filter(o => !o.caught).length : 0), 0);
   const t = (k, n, ic, badge) => `<button class="tab ${UI.tab === k ? 'on' : ''}" data-a="tab" data-k="${k}">${ic}<span>${n}</span>${badge ? `<span class="badge">${badge}</span>` : ''}</button>`;
   $('#tabs').innerHTML = t('ads', 'Объявления', I.ads) + t('garage', 'Гараж', I.garage, S.garage.length ? S.garage.length + '/' + S.slots : '') +
-    t('sale', 'Продажа', I.tag, offers) + t('wh', 'Склад', I.box, S.wh.last !== S.day && whDay(S.day).coef > 1 ? '🔥' : '') + t('me', 'Профиль', I.user, tasksReady());
+    t('sale', 'Продажа', I.tag, offers) + t('wh', 'Работа', I.box, S.wh.last !== S.day && whDay(S.day).coef > 1 ? '🔥' : '') + t('me', 'Профиль', I.user, tasksReady());
 }
 
 // ---------- объявления ----------
@@ -102,8 +102,10 @@ function filtered() {
 function viewAds() {
   const f = UI.f, list = filtered();
   const opt = (v, n, cur) => `<option value="${v}" ${String(cur) === String(v) ? 'selected' : ''}>${n}</option>`;
-  const seg = `<div class="seg"><button class="${UI.adsMode !== 'lots' ? 'on' : ''}" data-a="adsmode" data-k="cars">Машины</button><button class="${UI.adsMode === 'lots' ? 'on' : ''}" data-a="adsmode" data-k="lots">Гаражи с сюрпризом <span class="cnt">${S.lots.filter(x => !x.gone).length}</span></button></div>`;
+  const sb = (k, n, cnt) => `<button class="${(UI.adsMode || 'cars') === k ? 'on' : ''}" data-a="adsmode" data-k="${k}">${n}${cnt ? ` <span class="cnt">${cnt}</span>` : ''}</button>`;
+  const seg = `<div class="seg three">${sb('cars', 'Машины')}${sb('auc', 'Аукцион', S.auc.filter(x => !x.done).length)}${sb('lots', 'Гаражи', S.lots.filter(x => !x.gone).length)}</div>`;
   if (UI.adsMode === 'lots') return `<div class="screen-title h">Объявления</div>${seg}${viewLots()}`;
+  if (UI.adsMode === 'auc') return `<div class="screen-title h">Объявления</div>${seg}${viewAuction()}`;
   const ev = curEvent();
   return `
   <div class="screen-title h">Объявления</div>${ev ? `<div class="evbanner"><b>📈 ${esc(ev.n)}</b> · ещё ${S.event.until - S.day + 1} дн.<span>${esc(ev.t)}</span></div>` : ''}${seg}
@@ -337,6 +339,167 @@ function upRow(u) {
 }
 
 // ---------- гаражи с сюрпризом ----------
+// ---------- аукцион ----------
+function viewAuction() {
+  return `<div class="sub" style="margin:10px 0 4px">Машины лизинговых компаний, банков и страховых. Отчёт открытый — всё видно сразу. Вопрос только в том, кто даст больше. Торги сегодня, завтра новые лоты. Комиссия площадки ${AUC_FEE * 100}%.</div>
+  ${S.auc.map(aucCard).join('')}`;
+}
+function aucCard(a) {
+  const c = a.car, md = MODELS[c.m], T = AUC_TYPES[a.type], d = a.done;
+  const res = d ? (d.who === 'p' ? 'Ушла тебе' : d.who ? 'Ушла: ' + d.who : 'Никто не поднял') : '👥 Участников: ' + a.bots.length;
+  return `<div class="card ${d ? 'dim' : ''}" data-a="auclot" data-id="${a.id}">
+    <div class="${sceneClass(c)}"><div class="tags"><span class="tag">🔨 ${esc(T.n)}</span>${d ? `<span class="tag ${d.who === 'p' ? 'ok' : 'hot'}">${d.who ? 'Продано' : 'Не продано'}</span>` : ''}</div>${carPic(c)}</div>
+    <div class="info">
+      <div class="price">${d && d.who ? money(d.price) : 'Старт ' + money(a.start)}</div>
+      <div class="ttl">${esc(carName(c))}, ${c.year}</div>
+      <div class="meta">${specLine(c, md)}</div>
+      <div class="mkt">Рыночная цена ~ ${money(marketRef(c))}</div>
+      <div class="act"><div class="chip">${esc(res)}</div>${d ? '' : `<button class="btn small" data-a="auclot" data-id="${a.id}">Смотреть лот</button>`}</div>
+    </div></div>`;
+}
+function modalAucLot(m) {
+  const a = S.auc.find(x => x.id === m.id);
+  if (!a) return `<div class="panel"><button class="x" data-a="mclose">${I.x}</button><div class="sec-title">Лот снят</div></div>`;
+  const c = a.car, md = MODELS[c.m], T = AUC_TYPES[a.type], est = flipEstimate(c);
+  const be = roundPrice(Math.max(0, est.sell - est.repair) / (1 + AUC_FEE));
+  const full = S.garage.length >= S.slots;
+  return `<div class="panel"><button class="x" data-a="mclose">${I.x}</button><div class="title-plate h">${esc(T.n)}</div>
+    <div class="${sceneClass(c)}">${carPic(c)}</div>
+    <div class="big-title">${esc(carName(c))}, ${c.year}</div><div class="sub">${specLine(c, md)}</div>
+    <div class="desc">${esc(T.t)}</div>
+    <div class="report" style="margin-top:10px">
+      <h4>Отчёт площадки</h4>
+      <div class="rec ${c.km > 200000 ? 'bad' : ''}"><span>Пробег (проверен)</span><b>${km(c.km)}</b></div>
+      <div class="rec ${c.owners > 3 ? 'bad' : ''}"><span>Владельцев</span><b>${c.owners}</b></div>
+      <div class="rec ${c.acc ? 'bad' : 'good'}"><span>ДТП</span><b>${c.acc || 'нет'}</b></div>
+      ${c.taxi ? '<div class="rec bad"><span>Такси</span><b>работала</b></div>' : ''}
+      <div class="rec good"><span>Залоги и запреты</span><b>нет, юридически чистая</b></div>
+      <h4>Состояние узлов</h4>
+      ${PARTS.map(p => `<div class="rec ${c.wear[p.k] > 50 ? 'bad' : c.wear[p.k] < 20 ? 'good' : ''}"><span>${p.n}</span><b>износ ${c.wear[p.k]}%</b></div>`).join('')}
+    </div>
+    <div class="grid3" style="margin:12px 0">
+      <div class="plate beige"><small>Старт</small><b>${money(a.start)}</b></div>
+      <div class="plate blue"><small>После ремонта</small><b>${money(roundPrice(est.sell))}</b></div>
+      <div class="plate green"><small>Окупится до</small><b>${money(be)}</b></div>
+    </div>
+    <div class="note">«Окупится до» — если выиграешь дешевле, сделаешь ремонт в сервисе и продашь по рынку, будешь в плюсе. Чинить самому ещё выгоднее.</div>
+    ${a.done ? `<button class="btn block gray" disabled>Торги завершены</button>`
+      : full ? `<button class="btn block gray" disabled>В гараже нет места</button>`
+      : `<button class="btn block green" data-a="aucenter" data-id="${a.id}">🔨 Войти в торги · ${a.bots.length} ${plural(a.bots.length, 'участник', 'участника', 'участников')}</button>`}
+  </div>`;
+}
+// Живые торги: таймер, участники перебивают, каждая ставка продлевает время
+let AUC = null;
+const AUC_T0 = 12000, AUC_RESET = 6000;
+function aucDelay() { const d = rnd(700, 3000); return d > AUC.t - 250 ? Math.max(100, AUC.t - rnd(300, 1000)) : d; }
+function aucJump(a, n) { return a.leader == null ? a.start + aucStep(a.start) * (n - 1) : a.price + aucStep(a.price) * n; }
+function enterAuction(a) {
+  if (S.garage.length >= S.slots) return toast('В гараже нет места', true);
+  if (!aucCanPay(a, a.start)) return toast('Не хватает даже на стартовую ставку с комиссией', true);
+  aucStart(a);
+  AUC = { a, t: AUC_T0, over: false, log: [{ w: 'sys', t: 'Лот открыт. Стартовая цена ' + money(a.start) }], shown: 0 };
+  AUC.next = rnd(1500, 3500);
+  UI.modal = { type: 'auc' }; hap('medium'); render();
+  AUC.timer = setInterval(aucTick, 100);
+}
+function aucTick() {
+  if (!AUC || AUC.over) return;
+  AUC.t -= 100; AUC.next -= 100;
+  if (AUC.next <= 0 && AUC.t > 0) {
+    const i = aucBotMove(AUC.a);
+    if (i >= 0) { AUC.log.push({ w: 's', t: AUC.a.bots[i].n + ': ' + money(AUC.a.price) }); AUC.t = Math.max(AUC.t, AUC_RESET); sfx('bid'); hap('light'); }
+    AUC.next = aucDelay();
+  }
+  if (AUC.t <= 0) return aucEnd();
+  aucPaint();
+}
+function aucPlayerBid(n) {
+  const a = AUC.a;
+  if (AUC.over || a.leader === 'p') return;
+  const x = n > 1 ? aucJump(a, n) : aucNext(a);
+  if (!aucCanPay(a, x)) return toast('Не хватает денег с учётом комиссии', true);
+  aucBid(a, 'p', x); AUC.log.push({ w: 'p', t: 'Ты: ' + money(x) });
+  AUC.t = Math.max(AUC.t, AUC_RESET); AUC.next = aucDelay();
+  sfx('bid'); hap('medium'); aucPaint();
+}
+function aucEnd(silent) {
+  clearInterval(AUC.timer); AUC.over = true;
+  AUC.res = aucFinish(AUC.a);
+  sfx('hammer'); if (AUC.res.who === 'p') { sfx('cash'); hap('ok'); } else hap('warn');
+  checkAch(); save();
+  if (!silent) render();
+}
+function aucPaint() {
+  const el = id => document.getElementById(id), a = AUC.a;
+  if (!el('aucp')) return;
+  const st = el('aucst');
+  st.textContent = AUC.t > 4000 ? 'Идут торги' : AUC.t > 2000 ? 'Раз…' : 'Два…'; st.className = 'auc-status' + (AUC.t <= 4000 ? ' hot' : '');
+  el('auct').style.width = clamp(AUC.t / AUC_T0, 0, 1) * 100 + '%';
+  el('aucp').textContent = money(a.leader == null ? a.start : a.price);
+  el('aucl').textContent = a.leader == null ? 'ставок пока нет' : a.leader === 'p' ? 'Лидируешь ты 💪' : 'Лидирует: ' + a.bots[a.leader].n;
+  el('aucl').className = 'auc-lead' + (a.leader === 'p' ? ' me' : '');
+  const lead = a.leader === 'p', x1 = aucNext(a), x5 = aucJump(a, 5);
+  const b1 = el('aucb1'), b5 = el('aucb5');
+  b1.textContent = lead ? 'Ты лидер' : 'Ставка ' + money(x1); b1.disabled = lead || !aucCanPay(a, x1);
+  b5.textContent = lead ? 'Ждём…' : '+5 шагов: ' + money(x5); b5.disabled = lead || !aucCanPay(a, x5);
+  const cur = a.leader == null ? a.start : a.price;
+  el('aucn').textContent = 'С комиссией ' + money(cur + aucFee(cur)) + ' · на счету ' + money(S.money);
+  if (AUC.shown !== AUC.log.length) {
+    const lg = el('auclog'); lg.innerHTML = AUC.log.slice(-30).map(x => `<div class="bub ${x.w}">${esc(x.t)}</div>`).join(''); lg.scrollTop = lg.scrollHeight;
+    AUC.shown = AUC.log.length;
+  }
+}
+function modalAuc() {
+  if (!AUC) return '';
+  const a = AUC.a, c = a.car, T = AUC_TYPES[a.type];
+  const head = `<div class="row"><div class="${sceneClass(c)}" style="width:38%;flex:none">${carPic(c)}</div>
+    <div style="flex:1;min-width:0"><b>${esc(carName(c))}, ${c.year}</b><div class="sub">${esc(T.n)}</div></div></div>`;
+  if (AUC.over) {
+    const r = AUC.res, fee = aucFee(r.price);
+    return `<div class="panel"><div class="title-plate h">${r.who === 'p' ? '🔨 Продано тебе!' : '🔨 Продано'}</div>${head}
+      ${r.who === 'p' ? `<div class="grid2" style="margin:12px 0"><div class="plate beige"><small>Ставка</small><b>${money(r.price)}</b></div><div class="plate red"><small>Комиссия</small><b>${money(fee)}</b></div></div>
+        <div class="note">Машина уже в гараже. Почини и продай дороже.</div><button class="btn block green" data-a="aucgarage">${I.garage}В гараж</button>`
+      : `<div class="warn" style="margin:12px 0">${r.who ? 'Ушла к «' + esc(r.who) + '» за ' + money(r.price) + '.' : 'Никто не сделал ставку — лот снят.'}</div>
+        <button class="btn block" data-a="mclose">Ладно, в следующий раз</button>`}</div>`;
+  }
+  return `<div class="panel auc">${head}
+    <div class="auc-status" id="aucst"></div>
+    <div class="auc-time"><i id="auct"></i></div>
+    <div class="auc-price" id="aucp"></div><div class="auc-lead" id="aucl"></div>
+    <div class="chat auc-log" id="auclog"></div>
+    <div class="grid2" style="margin-top:10px"><button class="btn green" id="aucb1" data-a="aucbid" data-k="1"></button><button class="btn dark" id="aucb5" data-a="aucbid" data-k="5"></button></div>
+    <div class="note" id="aucn" style="text-align:center"></div>
+    <button class="btn block gray" style="margin-top:6px" data-a="mclose">Выйти из торгов</button></div>`;
+}
+
+// ---------- бизнесы ----------
+function viewBiz() {
+  const own = BIZ.filter(b => bizLv(b.k));
+  const daily = own.reduce((s, b) => s + bizIncome(b), 0), earned = own.reduce((s, b) => s + S.biz[b.k].earned, 0);
+  return `<div class="panel" style="margin-top:10px"><div class="grid2">
+      <div class="plate green"><small>Доход в день ~</small><b>${money(daily)}</b></div>
+      <div class="plate beige"><small>Принесли всего</small><b>${money(earned)}</b></div></div>
+    <div class="note">Деньги приходят каждое утро сами. Бывают поломки и проверки, а бывает, что везёт. Каждый бизнес ещё и помогает перекупу.</div></div>
+  ${BIZ.map(bizCard).join('')}`;
+}
+function bizCard(b) {
+  const lv = bizLv(b.k), x = S.biz[b.k], avg = (b.inc[0] + b.inc[1]) / 2;
+  const lock = b.minLv && level().i < b.minLv && !lv, p = lv < BIZ_MAX ? bizPrice(b, lv) : null;
+  const sell = `<button class="btn gray" data-a="bizsell" data-k="${b.k}">Продать</button>`;
+  return `<div class="panel biz ${lv ? 'own' : ''}">
+    <div class="row"><div class="biz-ic">${b.ic}</div><div style="flex:1;min-width:0"><b>${esc(b.n)}</b>${lv ? `<span class="lvl">ур. ${lv} из ${BIZ_MAX}</span>` : ''}<div class="sub">${esc(b.t)}</div></div></div>
+    <div class="grid2" style="margin-top:10px">
+      <div class="plate green"><small>Доход в день ~</small><b>${money(roundPrice(avg * BIZ_MUL[Math.max(1, lv)]))}</b></div>
+      <div class="plate ${lv ? 'beige' : 'blue'}"><small>${lv ? 'Принёс всего' : 'Окупится'}</small><b>${lv ? money(x.earned) : 'за ~' + Math.ceil(b.price / avg) + ' дн.'}</b></div>
+    </div>
+    <div class="perk">⭐ ${esc(b.perk)}</div>
+    ${lock ? `<button class="btn block gray" disabled>🔒 С уровня «${LEVELS[b.minLv][1]}»</button>`
+      : p == null ? `<div class="row"><span class="chip green" style="flex:1;text-align:center">Максимальный уровень</span>${sell}</div>`
+      : `<div class="row"><button class="btn ${lv ? '' : 'green'}" style="flex:1" data-a="biz" data-k="${b.k}">${lv ? 'Расширить' : 'Купить'} <span class="cost">${money(p)}</span></button>${lv ? sell : ''}</div>
+        ${lv ? `<div class="note">На ${lv + 1} уровне доход ~${money(roundPrice(avg * BIZ_MUL[lv + 1]))} в день.</div>` : ''}`}
+  </div>`;
+}
+
 function viewLots() {
   return `<div class="sub" style="margin:10px 0 4px">Гараж продают целиком, с тем, что внутри. Видно только силуэт. Можно торговаться. Повезёт — заберёшь тачку за копейки, не повезёт — ржавое корыто.</div>
   ${S.lots.filter(x => !x.gone).map(lotCard).join('')}`;
@@ -447,7 +610,7 @@ function pageCar(g) {
 
   <div class="panel" style="margin-top:28px"><div class="title-plate h">Подготовка</div>
     <div class="grid2">
-      <button class="btn small ${c.clean ? 'green' : ''}" data-a="wash" data-uid="${c.uid}" ${c.clean ? 'disabled' : ''}>${I.shine}${c.clean ? 'Блестит' : 'Мойка + полировка'} ${c.clean ? '' : `<span class="cost">${money(washPrice())}</span>`}</button>
+      <button class="btn small ${c.clean ? 'green' : ''}" data-a="wash" data-uid="${c.uid}" ${c.clean ? 'disabled' : ''}>${I.shine}${c.clean ? 'Блестит' : 'Мойка + полировка'} ${c.clean ? '' : `<span class="cost">${washPrice() ? money(washPrice()) : 'своя мойка'}</span>`}</button>
       <button class="btn small red" data-a="twist" data-uid="${c.uid}" ${c.twisted || g.sale ? 'disabled' : ''}>${I.gauge}${c.twisted ? 'Уже скручен' : 'Скрутить пробег'} ${c.twisted ? '' : `<span class="cost">${money(PRICES.twist)}</span>`}</button>
     </div>
     <div class="note">Скрутка поднимает цену, но покупатель с автотекой спалит — и репутация в минус.</div>
@@ -458,7 +621,7 @@ function pageCar(g) {
       <div class="kv"><span>Предложений</span><b>${g.offers.filter(o => !o.caught).length}</b></div>
       <div class="row" style="margin-top:10px"><button class="btn green" data-a="tab" data-k="sale">${I.tag}Предложения</button><button class="btn gray" data-a="unlist" data-uid="${c.uid}">Снять</button></div>`
       : `<button class="btn block green" data-a="sell" data-uid="${c.uid}">${I.tag}Выставить на доску объявлений</button>
-      <button class="btn block dark" style="margin-top:10px" data-a="quick" data-uid="${c.uid}">${I.cash}Слить перекупу сейчас за ${money(roundPrice(trueValue(c) * 0.72))}</button>`}
+      <button class="btn block dark" style="margin-top:10px" data-a="quick" data-uid="${c.uid}">${I.cash}${bizLv('razbor') ? 'Сдать на свою разборку' : 'Слить перекупу сейчас'} за ${money(quickPrice(c))}</button>`}
   </div>`;
 }
 
@@ -564,7 +727,7 @@ function viewMe() {
   <button class="btn block dark" style="margin-top:10px" data-a="avatar">${I.user}Изменить персонажа</button>
   <button class="btn block dark" style="margin-top:10px" data-a="sound">${S.sound === false ? '🔇 Звук выключен' : '🔊 Звук и вибрация включены'}</button>
   <button class="btn block dark" style="margin-top:10px" data-a="credits">Фото машин: авторы</button>
-  <div class="note" style="margin-top:14px;text-align:center">Perekup 0.5 · сохраняется сам: в Telegram и на телефоне</div>`;
+  <div class="note" style="margin-top:14px;text-align:center">Perekup 0.6 · сохраняется сам: в Telegram и на телефоне</div>`;
 }
 function viewTasks() {
   return `<div class="panel"><div class="sec-title">Задания дня</div>${S.daily.tasks.map((x, i) => `<div class="task ${x.claimed ? 'done' : ''}">
@@ -602,6 +765,8 @@ function modalHelp() {
       <div>😈 Можно скрутить пробег. Но если спалят — репутация в минус, и покупателей станет меньше.</div>
       <div>📦 <b>Склад Ozon</b>: кончились деньги — выйди на смену на СЦ Волхонское. Ромашка (буквы A–K), приёмка, аллея или грузчик. Коэффициент и спидометр как в жизни.</div>
       <div>🔒 <b>Гаражи с сюрпризом</b> — во вкладке объявлений: покупаешь гараж целиком, внутри случайная тачка.</div>
+      <div>🔨 <b>Аукцион</b> — там же. Машины банков, лизинга и страховых, всё проверено. Торги вживую: перебивай ставки, пока не стукнул молоток.</div>
+      <div>🏪 <b>Бизнесы</b> — во вкладке «Работа»: шаурмичная, мойка, ПВЗ, СТО, таксопарк. Приносят деньги каждое утро и помогают перекупу.</div>
       <div>🛠 <b>Улучшения</b> — во вкладке «Гараж»: инструменты, подъёмник, покраска, мойка, вывеска, ремонт помещения.</div>
       <div>📋 <b>Задания дня</b>, <b>банк</b> и <b>достижения</b> — в профиле. Следи за событиями рынка: на санкциях и моде на ретро можно поднять.</div>
       <div>🧍 <b>Персонаж</b>: нажми на человечка слева сверху — имя, причёска, шмот.</div>
@@ -642,15 +807,18 @@ function renderPage() {
 }
 function renderModal() {
   const m = UI.modal, el = $('#modal');
-  const fn = { report: modalReport, call: modalCall, fix: modalFix, sell: modalSell, counter: modalCounter, help: modalHelp, credits: modalCredits, avatar: modalAvatar, lot: modalLot, reveal: modalReveal, day: modalDay, confirm: modalConfirm }[m.type];
+  const fn = { report: modalReport, call: modalCall, fix: modalFix, sell: modalSell, counter: modalCounter, help: modalHelp, credits: modalCredits, avatar: modalAvatar, lot: modalLot, reveal: modalReveal, auclot: modalAucLot, auc: modalAuc, day: modalDay, confirm: modalConfirm }[m.type];
   let sheet = el.querySelector('.sheet');
   const fresh = !sheet || el.dataset.type !== m.type;
   if (fresh) { el.innerHTML = '<div class="sheet"></div>'; sheet = el.querySelector('.sheet'); el.dataset.type = m.type; }
   sheet.innerHTML = fn(m);
   el.className = 'on';
+  if (m.type === 'auc' && AUC && !AUC.over) aucPaint();
   const chat = $('#chat'); if (chat) chat.scrollTop = chat.scrollHeight;
 }
-function closeModal() { UI.modal = null; UI.counterX = null; const el = $('#modal'); el.className = ''; el.innerHTML = ''; el.dataset.type = ''; syncBack(); }
+function closeModal() {
+  if (AUC) { if (!AUC.over) { aucEnd(true); toast(AUC.res.who === 'p' ? 'Ты вышел, но лот остался за тобой' : 'Ты вышел из торгов'); } AUC = null; }
+  UI.modal = null; UI.counterX = null; const el = $('#modal'); el.className = ''; el.innerHTML = ''; el.dataset.type = ''; syncBack(); }
 function closePage() { UI.page = null; const p = $('#page'); p.className = ''; p.innerHTML = ''; p.dataset.key = ''; render(); }
 function syncBack() {
   if (!hasTg || !tgApp.BackButton) return;
@@ -661,7 +829,7 @@ function goBack() { if (UI.modal) { closeModal(); render(); } else if (UI.page) 
 // ---------- события ----------
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-a]');
-  if (!t) { if (e.target.id === 'modal' && UI.modal && UI.modal.type !== 'confirm') { closeModal(); render(); } return; }
+  if (!t) { if (e.target.id === 'modal' && UI.modal && UI.modal.type !== 'confirm' && UI.modal.type !== 'auc') { closeModal(); render(); } return; }
   const a = t.dataset.a, id = +t.dataset.id, uid = +t.dataset.uid;
   const L = () => S.listings.find(x => x.id === id), G = () => gItem(uid);
   if (a === 'offpct' || a === 'sellpct' || a === 'cntx' || a === 'lotpct') return;
@@ -701,6 +869,16 @@ document.addEventListener('click', e => {
     case 'buylot': { const lot = S.lots.find(x => x.id === id), uid = lot.car.uid, err = buyLot(lot); if (err) return toast(err, true);
       hap('ok'); sfx('door'); UI.modal = { type: 'reveal', uid }; commit(); break; }
     case 'upgrade': { const err = buyUpgrade(t.dataset.k); err ? toast(err, true) : (toast('Гараж прокачан'), hap('ok')); commit(); break; }
+    case 'auclot': UI.modal = { type: 'auclot', id }; hap('light'); render(); break;
+    case 'aucenter': enterAuction(S.auc.find(x => x.id === id)); break;
+    case 'aucbid': aucPlayerBid(+t.dataset.k); break;
+    case 'aucgarage': closeModal(); UI.tab = 'garage'; UI.page = null; render(); break;
+    case 'workmode': UI.workMode = t.dataset.k; hap('light'); render(); $('#view').scrollTop = 0; break;
+    case 'biz': { const b = BIZ.find(x => x.k === t.dataset.k), lv = bizLv(b.k), p = bizPrice(b, lv);
+      confirmBox(lv ? 'Расширить бизнес?' : 'Купить бизнес?', `«${esc(b.n)}» ${lv ? 'до ' + (lv + 1) + ' уровня ' : ''}за <b>${money(p)}</b>. Доход станет ~${money(roundPrice((b.inc[0] + b.inc[1]) / 2 * BIZ_MUL[lv + 1]))} в день.`, lv ? 'Расширить' : 'Купить',
+        () => { const err = buyBiz(b.k); err ? toast(err, true) : (toast(lv ? 'Бизнес расширен' : 'Бизнес твой! ' + b.ic), sfx('cash')); }); break; }
+    case 'bizsell': { const b = BIZ.find(x => x.k === t.dataset.k), p = bizSellPrice(b.k);
+      confirmBox('Продать бизнес?', `«${esc(b.n)}» заберут за <b>${money(p)}</b> — это 60% от вложенного.`, 'Продать', () => { sellBiz(b.k); toast('Продано за ' + money(p)); sfx('cash'); }, true); break; }
     case 'avatar': openAvatar(); break;
     case 'av': { const d = UI.modal.draft, k = t.dataset.k; d[k] = ['skin', 'hairC', 'topC'].includes(k) ? +t.dataset.v : t.dataset.v; hap('light');
       $('#avprev').innerHTML = avatarSvg(d); t.parentNode.querySelectorAll('.on').forEach(x => x.classList.remove('on')); t.classList.add('on'); break; }
@@ -712,7 +890,7 @@ document.addEventListener('click', e => {
     case 'sell': UI.sellPct = 100; UI.modal = { type: 'sell', g: G() }; render(); break;
     case 'dolist': { const g = UI.modal.g; listForSale(g, marketPrice(g) * UI.sellPct / 100); closeModal(); toast('Объявление опубликовано!'); hap('ok'); commit(); break; }
     case 'unlist': unlist(G()); toast('Снято с продажи'); commit(); break;
-    case 'quick': { const g = G(), p = roundPrice(trueValue(g.car) * 0.72); confirmBox('Слить перекупу?', `Заберёт прямо сейчас за <b>${money(p)}</b>. Навар: ${money(p - g.paid - g.spent)}.`, 'Сливаю', () => { quickSell(g); UI.page = null; $('#page').className = ''; toast('Продано за ' + money(p)); hap('ok'); }); break; }
+    case 'quick': { const g = G(), p = quickPrice(g.car); confirmBox('Слить перекупу?', `Заберёт прямо сейчас за <b>${money(p)}</b>. Навар: ${money(p - g.paid - g.spent)}.`, 'Сливаю', () => { quickSell(g); UI.page = null; $('#page').className = ''; toast('Продано за ' + money(p)); hap('ok'); }); break; }
     case 'slot': { const p = slotPrice(); confirmBox('Ещё одно место?', `Купить место в гараже за <b>${money(p)}</b>? Аренда вырастет на 700 ₽ в день.`, 'Купить', () => { const err = buySlot(); err ? toast(err, true) : toast('Место куплено'); }); break; }
     case 'accept': {
       const g = G(), o = g.offers.find(x => x.id === +t.dataset.o);

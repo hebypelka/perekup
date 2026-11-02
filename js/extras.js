@@ -30,6 +30,7 @@ const TASKS = [
   { k: 'lot', t: 'Купи гараж с сюрпризом', need: 1 },
   { k: 'wash', t: 'Помой машину перед продажей', need: 1 },
   { k: 'haggle', t: 'Выбей у продавца скидку от 10%', need: 1 },
+  { k: 'auction', t: 'Выиграй лот на аукционе', need: 1 },
 ];
 function genTasks() {
   const lv = level().i;
@@ -94,6 +95,10 @@ const ACH = [
   { k: 'loft', n: 'Лофт', t: 'Сделать гаражу ремонт по максимуму', ok: () => up('room') >= 3 },
   { k: 'salon', n: 'Автосалон', t: 'Открыть свой автосалон', ok: () => up('salon') >= 1 },
   { k: 'tasks', n: 'Исполнительный', t: 'Выполнить 20 заданий', ok: () => (S.tasksDone || 0) >= 20 },
+  { k: 'hammer', n: 'Молоток', t: 'Выиграть аукцион', ok: () => S.flags.hammer },
+  { k: 'biz', n: 'Бизнесмен', t: 'Купить первый бизнес', ok: () => S.flags.biz },
+  { k: 'empire', n: 'Империя', t: 'Владеть всеми бизнесами', ok: () => BIZ.every(b => bizLv(b.k)) },
+  { k: 'tycoon', n: 'Олигарх', t: 'Прокачать любой бизнес до максимума', ok: () => BIZ.some(b => bizLv(b.k) >= BIZ_MAX) },
 ];
 function flag(k) { S.flags = S.flags || {}; S.flags[k] = true; }
 function checkAch() {
@@ -145,6 +150,8 @@ function sfx(kind) {
     else if (kind === 'coin') { tone(988, 0, 0.08, 'square', 0.05); tone(1319, 0.06, 0.25, 'square', 0.05); }
     else if (kind === 'ach') [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.09, 0.3, 'triangle', 0.12));
     else if (kind === 'err') { tone(220, 0, 0.15, 'sawtooth', 0.06); tone(165, 0.1, 0.2, 'sawtooth', 0.06); }
+    else if (kind === 'bid') tone(660, 0, 0.07, 'square', 0.04);
+    else if (kind === 'hammer') { tone(140, 0, 0.12, 'square', 0.12); tone(90, 0.02, 0.3, 'triangle', 0.15); }
     else if (kind === 'door') { tone(110, 0, 0.6, 'sawtooth', 0.04); tone(90, 0.3, 0.5, 'sawtooth', 0.04); }
   } catch (e) { }
 }

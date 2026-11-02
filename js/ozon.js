@@ -22,7 +22,9 @@ function viewWarehouse() {
   const letters = `<div class="wh-letters">${Object.keys(WH.letters).map(x => `<button class="wh-letter ${x === UI.whLetter ? 'on' : ''}" style="--c:${LETTER_COL[x]}" data-a="wl" data-k="${x}">${x}</button>`).join('')}</div>
     <div class="sub" style="margin-top:6px"><b style="color:var(--text)">Буква ${UI.whLetter}.</b> ${L.t}</div>`;
   const flow = ['Фура', 'Разгрузка', 'Приёмка', 'Ромашки A–K и аллея', 'Ворота', 'Погрузка', 'Фура'];
-  return `<div class="screen-title">Склад Ozon</div>
+  const seg = `<div class="seg"><button class="${UI.workMode !== 'biz' ? 'on' : ''}" data-a="workmode" data-k="wh">Склад Ozon</button><button class="${UI.workMode === 'biz' ? 'on' : ''}" data-a="workmode" data-k="biz">Мои бизнесы${Object.keys(S.biz).length ? ` <span class="cnt">${Object.keys(S.biz).length}</span>` : ''}</button></div>`;
+  if (UI.workMode === 'biz') return `<div class="screen-title">Бизнесы</div>${seg}${viewBiz()}`;
+  return `<div class="screen-title">Склад Ozon</div>${seg}
   <div class="panel wh-head">
     <div class="sec-title">${WH.name}</div>
     <div class="grid2">

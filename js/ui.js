@@ -35,6 +35,7 @@ const I = {
   help: ico('<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/>'),
   plus: ico('<path d="M12 5v14M5 12h14"/>'),
   cal: ico('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>'),
+  box: ico('<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'),
   eye: ico('<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
 };
 const BODY_NAMES = { sedan: 'седан', hatch: 'хэтчбек', wagon: 'универсал', suv: 'внедорожник', suvc: 'кроссовер-купе', box: 'внедорожник',
@@ -63,7 +64,7 @@ function daysAgo(d) { const n = S.day - d; return n <= 0 ? 'сегодня' : n 
 function render() {
   renderTop(); renderTabs();
   const v = $('#view');
-  v.innerHTML = UI.tab === 'ads' ? viewAds() : UI.tab === 'garage' ? viewGarage() : UI.tab === 'sale' ? viewSale() : viewMe();
+  v.innerHTML = UI.tab === 'ads' ? viewAds() : UI.tab === 'garage' ? viewGarage() : UI.tab === 'sale' ? viewSale() : UI.tab === 'wh' ? viewWarehouse() : viewMe();
   if (UI.page) renderPage();
   if (UI.modal) renderModal();
   syncBack();
@@ -80,7 +81,7 @@ function renderTabs() {
   const offers = S.garage.reduce((n, g) => n + (g.sale ? g.offers.filter(o => !o.caught).length : 0), 0);
   const t = (k, n, ic, badge) => `<button class="tab ${UI.tab === k ? 'on' : ''}" data-a="tab" data-k="${k}">${ic}<span>${n}</span>${badge ? `<span class="badge">${badge}</span>` : ''}</button>`;
   $('#tabs').innerHTML = t('ads', 'Объявления', I.ads) + t('garage', 'Гараж', I.garage, S.garage.length ? S.garage.length + '/' + S.slots : '') +
-    t('sale', 'Продажа', I.tag, offers) + t('me', 'Профиль', I.user);
+    t('sale', 'Продажа', I.tag, offers) + t('wh', 'Склад', I.box, S.wh.last !== S.day && whDay(S.day).coef > 1 ? '🔥' : '') + t('me', 'Профиль', I.user);
 }
 
 // ---------- объявления ----------
@@ -115,7 +116,7 @@ function adCard(l) {
   if (l.urgent) tags.unshift('<span class="tag hot">СРОЧНО</span>');
   if (l.deal) tags.unshift('<span class="tag ok">Договорились</span>');
   return `<div class="card ${l.gone && !l.deal ? 'dim' : ''}" data-a="ad" data-id="${l.id}">
-    <div class="${sceneClass(c)}"><div class="tags">${tags.join('')}</div>${carSvg(c)}</div>
+    <div class="${sceneClass(c)}"><div class="tags">${tags.join('')}</div>${carPic(c)}</div>
     <div class="side">
       <div class="plate beige"><small>Цена</small><b>${money(l.deal || l.ask)}</b></div>
       <div class="plate ${profit > 0 ? 'green' : 'red'}"><small>Навар ~</small><b>${profit > 0 ? '+' : ''}${money(profit)}</b></div>
@@ -137,7 +138,7 @@ function pageListing(l) {
   const insp = inspectPrice(l);
   return `
   <button class="back" data-a="close">${I.back}Объявления</button>
-  <div class="${sceneClass(c)}"><div class="tags">${l.urgent ? '<span class="tag hot">СРОЧНО</span>' : ''}<span class="tag">${I.eye}${40 + (l.id * 37) % 800 + (S.day - l.posted) * 23}</span></div>${carSvg(c)}</div>
+  <div class="${sceneClass(c)}"><div class="tags">${l.urgent ? '<span class="tag hot">СРОЧНО</span>' : ''}<span class="tag">${I.eye}${40 + (l.id * 37) % 800 + (S.day - l.posted) * 23}</span></div>${carPic(c)}</div>
   <div class="big-title">${esc(md.brand + ' ' + md.name)}, ${c.year}</div>
   <div class="row" style="justify-content:space-between">
     <div class="price-big">${money(price)}</div>
@@ -150,7 +151,7 @@ function pageListing(l) {
       <dt>Двигатель</dt><dd>${md.engine}, ${md.hp} л.с.</dd>
       <dt>Коробка</dt><dd>${md.box}</dd>
       <dt>Привод</dt><dd>${md.drive}</dd>
-      <dt>Кузов</dt><dd>${BODY_NAMES[md.body]}, ${COLORS[c.color].n}</dd>
+      <dt>Кузов</dt><dd>${BODY_NAMES[md.body]}${PHOTOS[c.m] ? '' : ', ' + COLORS[c.color].n}</dd>
       <dt>Владельцев</dt>${own}
       <dt>ДТП</dt>${acc}
       ${k.auto && c.taxi ? '<dt>Такси</dt><dd class="bad">работала в такси</dd>' : ''}
@@ -314,8 +315,9 @@ function garageCard(g) {
   if (g.sale) tags.unshift(`<span class="tag ok">На продаже</span>`);
   if (c.legal.zalog || c.legal.limit) tags.push('<span class="tag hot">Документы!</span>');
   if (c.twisted) tags.push('<span class="tag hot">Скручен</span>');
+  if ((g.orders || []).length) tags.push('<span class="tag">📦 Запчасть едет</span>');
   return `<div class="card mine" data-a="car" data-uid="${c.uid}">
-    <div class="${sceneClass(c)}"><div class="tags">${tags.join('')}</div>${carSvg(c)}</div>
+    <div class="${sceneClass(c)}"><div class="tags">${tags.join('')}</div>${carPic(c)}</div>
     <div class="side">
       <div class="plate beige"><small>Вложено</small><b>${money(g.paid + g.spent)}</b></div>
       <div class="plate ${profit > 0 ? 'green' : 'red'}"><small>Рынок ~</small><b>${money(mp)}</b></div>
@@ -334,7 +336,8 @@ function pageCar(g) {
     return `<div class="part ${w > 50 ? 'bad' : w > 20 ? 'need' : ''}">
       ${pic(p)}
       <b>${p.n}</b><small>износ ${w}%</small><div class="bar"><i style="width:${w}%;background-position:${-w}px 0"></i></div>
-      <button class="btn small ${w > 20 ? '' : 'gray'}" data-a="fix" data-uid="${c.uid}" data-k="${p.k}" ${w <= 3 || g.sale ? 'disabled' : ''}>Ремонт</button></div>`;
+      ${ordered(g, p.k) ? `<button class="btn small gray" disabled>📦 Едет ${Math.max(1, ordered(g, p.k).at - S.day)} дн.</button>`
+        : `<button class="btn small ${w > 20 ? '' : 'gray'}" data-a="fix" data-uid="${c.uid}" data-k="${p.k}" ${w <= 3 || g.sale ? 'disabled' : ''}>Ремонт</button>`}</div>`;
   };
   const mp = marketPrice(g);
   const L = c.legal;
@@ -343,7 +346,7 @@ function pageCar(g) {
   <div class="panel" style="margin-top:30px"><div class="title-plate h">Ремонт автомобиля</div>
     <div style="text-align:center;font-weight:800;margin-bottom:8px">${esc(md.brand + ' ' + md.name)}, ${c.year} · ${km(c.kmShown)}</div>
     <div class="repair">${PARTS.slice(0, 3).map(tile).join('')}</div>
-    <div class="mid-scene ${sceneClass(c)}">${carSvg(c)}</div>
+    <div class="mid-scene ${sceneClass(c)}">${carPic(c)}</div>
     <div class="repair">${PARTS.slice(3).map(tile).join('')}</div>
     ${!k.insp ? `<button class="btn block" style="margin-top:12px" data-a="inspect" data-uid="${c.uid}">${I.eye}Осмотреть машину (бесплатно)</button>` : ''}
     <div class="grid3" style="margin-top:12px">
@@ -388,6 +391,8 @@ function modalFix(m) {
     <div style="text-align:center;margin-bottom:10px">Износ <b>${c.wear[p.k]}%</b>. Как чиним?</div>
     <button class="btn block" data-a="dofix" data-diy="1">${I.wrench}Сам в гараже <span class="cost">${money(diy)}</span></button>
     <div class="note">Дёшево, но не идеально. Иногда руки подводят.</div>
+    <button class="btn block ozon" style="margin-top:6px" data-a="ozonfix">${I.box}Запчасть с Ozon <span class="cost">${money(ozonCost(c, p.k))}</span></button>
+    <div class="note">Ещё дешевле, но едет 1–3 дня, ставишь сам. Иногда пересорт: заказал фару — пришёл чехол на айфон.</div>
     <button class="btn block green" style="margin-top:6px" data-a="dofix" data-diy="0">${I.check}В сервис <span class="cost">${money(pro)}</span></button>
     <div class="note">Дорого, зато как новое.</div></div>`;
 }
@@ -422,7 +427,7 @@ function saleBlock(g) {
   const offs = g.offers;
   return `<div class="panel">
     <div class="row" data-a="car" data-uid="${c.uid}">
-      <div class="${sceneClass(c)}" style="width:42%;flex:none">${carSvg(c)}</div>
+      <div class="${sceneClass(c)}" style="width:42%;flex:none">${carPic(c)}</div>
       <div style="flex:1;min-width:0"><b>${esc(carName(c))}</b><div class="sub">${c.year} · ${km(c.kmShown)}</div>
         <div class="price-big" style="font-size:19px">${money(g.sale.price)}</div><div class="sub">висит ${S.day - g.sale.day + 1} дн.</div></div>
     </div>
@@ -476,7 +481,8 @@ function viewMe() {
   <div class="panel flat"><div class="h" style="font-size:13px;margin-bottom:4px">Журнал</div>
     <div class="log">${S.log.slice(0, 25).map(x => `<div><span>Д${x.d}</span>${esc(x.t)}</div>`).join('')}</div></div>
   <div class="grid2"><button class="btn dark" data-a="help">${I.help}Как играть</button><button class="btn red" data-a="reset">Начать заново</button></div>
-  <div class="note" style="margin-top:14px">Perekup 0.1 · прогресс сохраняется в Telegram</div>`;
+  <button class="btn block dark" style="margin-top:10px" data-a="credits">📷 Фото машин</button>
+  <div class="note" style="margin-top:14px">Perekup 0.2 · прогресс сохраняется в Telegram</div>`;
 }
 function modalHelp() {
   return `<div class="panel"><button class="x" data-a="mclose">${I.x}</button><div class="title-plate h">Как стать перекупом</div>
@@ -488,8 +494,15 @@ function modalHelp() {
       <div>🏷️ <b>Продавай</b> на доске. Покупатели звонят по утрам — жми «День ›». Торгуйся с ними.</div>
       <div>☀️ Каждый день — аренда гаража. Объявления уходят: кто не успел, тот опоздал.</div>
       <div>😈 Можно скрутить пробег. Но если спалят — репутация в минус, и покупателей станет меньше.</div>
+      <div>📦 <b>Склад Ozon</b>: кончились деньги — выйди на смену на СЦ Волхонское. Ромашка или приёмка, коэффициент и спидометр как в жизни.</div>
     </div>
     <button class="btn block" style="margin-top:12px" data-a="mclose">Погнали</button></div>`;
+}
+function modalCredits() {
+  const rows = MODELS.map(md => (PHOTOS[md.id] || []).map(p => `<div><a href="${p.p}" target="_blank" rel="noopener">${esc(md.brand + ' ' + md.name)}</a> — ${esc(p.by)}, ${esc(p.l)}</div>`).join('')).join('');
+  return `<div class="panel"><button class="x" data-a="mclose">${I.x}</button><div class="title-plate h">Фото машин</div>
+    <div class="note" style="margin-bottom:8px">Все фото — с Wikimedia Commons под свободными лицензиями. Спасибо авторам!</div>
+    <div class="log credits">${rows}</div></div>`;
 }
 function modalDay(m) {
   return `<div class="panel"><button class="x" data-a="mclose">${I.x}</button><div class="title-plate h">День ${S.day}</div>
@@ -519,7 +532,7 @@ function renderPage() {
 }
 function renderModal() {
   const m = UI.modal, el = $('#modal');
-  const fn = { report: modalReport, call: modalCall, fix: modalFix, sell: modalSell, counter: modalCounter, help: modalHelp, day: modalDay, confirm: modalConfirm }[m.type];
+  const fn = { report: modalReport, call: modalCall, fix: modalFix, sell: modalSell, counter: modalCounter, help: modalHelp, credits: modalCredits, day: modalDay, confirm: modalConfirm }[m.type];
   let sheet = el.querySelector('.sheet');
   const fresh = !sheet || el.dataset.type !== m.type;
   if (fresh) { el.innerHTML = '<div class="sheet"></div>'; sheet = el.querySelector('.sheet'); el.dataset.type = m.type; }
@@ -564,6 +577,8 @@ document.addEventListener('click', e => {
     case 'owncheck': { const err = checkOwn(G(), t.dataset.w); if (err) return toast(err, true); commit(); openReport(G().car, t.dataset.w); break; }
     case 'fix': UI.modal = { type: 'fix', g: G(), pk: t.dataset.k }; render(); break;
     case 'dofix': { const err = repair(UI.modal.g, UI.modal.pk, t.dataset.diy === '1'); closeModal(); if (err) toast(err, err === 'Не хватает денег'); else { toast('Готово! 🔧'); hap('ok'); } commit(); break; }
+    case 'ozonfix': { const err = orderOzon(UI.modal.g, UI.modal.pk); closeModal(); if (err) toast(err, true); else { toast('Заказал на Ozon 📦 Жди доставку'); hap('ok'); } commit(); break; }
+    case 'credits': UI.modal = { type: 'credits' }; render(); break;
     case 'wash': { const err = wash(G()); err ? toast(err, true) : toast('Блестит как у кота яйца ✨'); commit(); break; }
     case 'twist': { const g = G(); confirmBox('Скрутить пробег?', `Сейчас ${km(g.car.kmShown)}. Станет примерно вдвое меньше. Если покупатель пробьёт автотеку — спалишься.`, 'Крутим', () => { const err = twist(g); err ? toast(err, true) : toast('Пробег: ' + km(g.car.kmShown) + ' 😈'); }, true); break; }
     case 'zalog': { const err = clearZalog(G()); err ? toast(err, true) : toast('Залог погашен'); commit(); break; }

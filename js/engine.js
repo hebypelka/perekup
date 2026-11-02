@@ -36,11 +36,13 @@ function newGame() {
     listings: [], garage: [], log: [],
     stats: { bought: 0, sold: 0, profit: 0, best: 0, caught: 0 },
     savedAt: 0, seenHelp: false,
+    wh: newWh(),
   };
   for (let i = 0; i < 14; i++) S.listings.push(genListing(ri(0, 2)));
   addLog('Начал карьеру перекупа с ' + money(START_MONEY) + ' в кармане.');
 }
 
+function newWh() { return { last: 0, shifts: 0, earned: 0, best: 0, seed: ri(1, 1e6) }; }
 function addLog(t) { S.log.unshift({ d: S.day, t }); if (S.log.length > 60) S.log.length = 60; }
 function level() {
   let i = 0; while (i + 1 < LEVELS.length && S.stats.profit >= LEVELS[i + 1][0]) i++;
@@ -126,7 +128,7 @@ function genCar() {
     uid: S ? S.nextId++ : 0, m: md.id, year, color, km: kmReal, kmShown: kmReal, owners, ownersSaid: owners,
     acc, accSaid: acc, taxi, taxiSaid: taxi, wear, declared: {},
     legal: { zalog: 0, limit: 0, wanted: false }, k: { auto: false, probiv: false, insp: false },
-    scene: pick(['garage', 'street', 'yard', 'snow', 'sunset']), twisted: false, clean: false,
+    scene: pick(['garage', 'street', 'yard', 'snow', 'sunset']), twisted: false, clean: false, ph: ri(0, 5),
   };
 }
 
@@ -137,6 +139,7 @@ function genListing(ageDays) {
     ded: md.classic || car.year < 2005 ? 4 : 1, baryga: 3, wife: 2, taxi: car.taxi ? 6 : 0.5,
     boss: md.cls === 'prem' || md.cls === 'biz' ? 4 : 0.3, student: md.cls === 'econ' || md.cls === 'sport' ? 2.5 : 0.6,
     salon: car.year >= 2015 ? 3 : 0.2,
+    ozon: md.cls === 'econ' || md.cls === 'mid' || md.cls === 'comm' ? 1.2 : 0.3, den: 0.12, yan: 0.12,
   })[s.k]);
   // что продавец «забыл» сказать
   for (const p of PARTS) car.declared[p.k] = car.wear[p.k] > 40 && chance(st.honesty);
@@ -162,7 +165,8 @@ function genListing(ageDays) {
   if (car.ownersSaid === 1) lines.push('Один владелец по ПТС.');
   if (car.taxiSaid) lines.push('Работала в такси, обслуживалась в парке.');
   if (car.accSaid > 0) lines.push('Были мелкие ДТП, всё восстановлено.');
-  lines.push(pick(AD_TAIL));
+  lines.push(st.k === 'den' ? 'Продаю, всё равно прав нет. Найти меня можно на ромашке 🌼' : st.k === 'yan' ? 'Принимал сам, брака нет 😎 Смотреть после приёмки.'
+    : st.k === 'ozon' ? pick(AD_OZON) : pick(AD_TAIL));
 
   return {
     id: S ? S.nextId++ : Math.random(), car, seller: SELLERS.indexOf(st), sname: pick(st.name), city: pick(CITIES),
@@ -301,6 +305,58 @@ function repair(g, pk, diy) {
   c.wear[pk] = ri(0, 3);
   return null;
 }
+// Запчасть с Ozon: дешевле, но едет 1–3 дня и бывает пересорт. Ставишь сам.
+function ozonCost(car, pk) {
+  const p = PARTS.find(x => x.k === pk);
+  return roundPrice(p.share * partBase(car) * car.wear[pk] / 100 * 0.2 + 199);
+}
+function orderOzon(g, pk) {
+  const cost = ozonCost(g.car, pk);
+  if (!canPay(cost)) return 'Не хватает денег';
+  pay(cost); g.spent += cost;
+  (g.orders = g.orders || []).push({ pk, at: S.day + ri(1, 3), wrong: chance(0.15) });
+  return null;
+}
+const ordered = (g, pk) => (g.orders || []).find(o => o.pk === pk);
+function deliverOrders(ev) {
+  for (const g of S.garage) for (const o of (g.orders || []).slice()) {
+    if (o.at > S.day) continue;
+    const pn = PARTS.find(x => x.k === o.pk).n;
+    if (o.wrong) {
+      o.wrong = chance(0.05); o.at = S.day + ri(1, 2);
+      ev.push({ t: '📦 Ozon: пересорт!', s: 'Ждал «' + pn + '» для ' + carName(g.car) + ', а в коробке — ' + pick(WH.junk) + '. Перезаказал бесплатно.' });
+      continue;
+    }
+    const fail = chance(0.12), w = g.car.wear[o.pk];
+    g.car.wear[o.pk] = fail ? Math.round(w * 0.8) : Math.round(w * rnd(0.2, 0.35));
+    g.orders = g.orders.filter(x => x !== o);
+    ev.push({ t: '📦 Ozon привёз: ' + pn, s: carName(g.car) + (fail ? ' — поставил криво, но едет' : ' — поставил сам, норм') });
+  }
+}
+
+// ---------- склад Ozon ----------
+const isPayday = d => d % 7 === 0;
+// Какой сегодня день на складе: коэффициент и сколько товара. Детерминированно от дня, чтобы не перероллить.
+function whDay(d) {
+  let x = (S.wh.seed * 9301 + d * 49297) % 233280; x = ((x * 9301 + 49297) % 233280) / 233280;
+  const y = ((d * 7919 + S.wh.seed) % 1000) / 1000;
+  if (x < 0.13) return { coef: 1.25 + Math.round(y * 15) / 100, flow: 'high', t: 'Коэффициент повышен!' };
+  if (x < 0.33) return { coef: 1, flow: 'low', t: 'Мало товара' };
+  if (x < 0.5) return { coef: 1, flow: 'high', t: 'Товара завались' };
+  return { coef: 1, flow: 'norm', t: 'Обычный день' };
+}
+// Спидометр: каждые 2000 пиков — бонус, и он растёт: 200, 400, 600…
+const speedBonus = picks => { const n = Math.floor(picks / 2000); return 100 * n * (n + 1); };
+function shiftPay(role, good, d) {
+  const picks = good * WH.roles[role].ppc, base = Math.round(picks * d.coef), bonus = speedBonus(picks);
+  return { picks, base, bonus, total: base + bonus };
+}
+function finishShift(role, res) {
+  S.money += res.total;
+  S.wh.last = S.day; S.wh.shifts++; S.wh.earned += res.total; S.wh.best = Math.max(S.wh.best, res.total);
+  addLog('Смена на ' + WH.name + ' (' + WH.roles[role].n.toLowerCase() + '): ' + res.picks + ' пиков, ' + money(res.total) + '.');
+}
+
 function wash(g) { if (!canPay(PRICES.wash)) return 'Не хватает денег'; pay(PRICES.wash); g.spent += PRICES.wash; g.car.clean = true; return null; }
 function twist(g) {
   const c = g.car;
@@ -348,7 +404,8 @@ function genOffers(g) {
   let n = 0; let L = Math.exp(-lambda), p = 1; do { n++; p *= Math.random(); } while (p > L); n--;
   const out = [];
   for (let i = 0; i < Math.min(n, 4); i++) {
-    const b = wpick(BUYERS, x => x.k === 'boss' ? (md.cls === 'prem' || md.cls === 'sport' ? 3 : 0.5) : x.k === 'granny' ? 0.4 : 1.5);
+    const b = wpick(BUYERS, x => x.k === 'boss' ? (md.cls === 'prem' || md.cls === 'sport' ? 3 : 0.5) : x.k === 'granny' ? 0.4
+      : x.k === 'klad' ? (isPayday(S.day) && price < 1500000 ? 4 : 0.4) : x.k === 'podryad' ? (md.cls === 'comm' ? 3 : 0) : 1.5);
     const checks = chance(b.check + (price > 1500000 ? 0.2 : 0));
     let v = valueOf(c, buyerView(c, checks)) * (1 + (S.rep - 50) / 600) * (c.clean ? 1.03 : 1);
     const name = pick(b.name);
@@ -364,7 +421,9 @@ function genOffers(g) {
     const offer = roundPrice(Math.min(price, max * rnd(0.86, 0.97)));
     if (offer < price * 0.6) continue;
     out.push({ id: S.nextId++, face: b.face, name, offer, max, patience: 2, checked: checks,
-      text: offer >= price ? pick(['Беру за вашу цену, когда можно приехать?', 'Готов забрать хоть сегодня по цене объявления.'])
+      text: b.k === 'podryad' ? pick(['Беру под развоз для Ozon. Даю ' + money(offer) + '.', 'Нам на Волхонку нужна ещё машина. ' + money(offer) + ', и забираю завтра.'])
+        : b.k === 'klad' ? pick(['Зарплату получил — беру за ' + money(offer) + '!', 'Со склада пацаны скинулись, даём ' + money(offer) + '.'])
+        : offer >= price ? pick(['Беру за вашу цену, когда можно приехать?', 'Готов забрать хоть сегодня по цене объявления.'])
         : pick(['Посмотрел машину. Готов взять за ' + money(offer) + '.', 'Скинете до ' + money(offer) + '? Деньги на руках.', 'Предлагаю ' + money(offer) + ', больше не дам, жена убьёт.', 'За ' + money(offer) + ' забрал бы.']) });
   }
   return out;
@@ -394,6 +453,8 @@ function nextDay() {
   ev.push({ t: 'Новых объявлений', s: '+' + fresh + (gone ? ', ушло ' + gone : '') });
   S.listings.forEach(l => { if (!l.gone && !l.deal) l.patience = Math.max(l.patience, 1); });
 
+  deliverOrders(ev);
+  if (isPayday(S.day)) ev.push({ t: '💸 День зарплаты на складе', s: 'кладовщики при деньгах — покупателей больше' });
   // Гараж: менты за краденым, покупатели
   for (const g of S.garage.slice()) {
     if (g.car.legal.wanted && chance(0.45)) {
@@ -462,6 +523,7 @@ async function load() {
   const cloud = await cloudLoad();
   const best = [local, cloud].filter(x => x && x.v === 1).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))[0];
   if (best) S = best; else newGame();
+  if (!S.wh) S.wh = newWh();
 }
 function resetGame() {
   try { localStorage.removeItem(SAVE_KEY); } catch (e) { }

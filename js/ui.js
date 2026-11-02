@@ -44,14 +44,14 @@ const hasTg = !!(tgApp && tgApp.initData !== undefined && tgApp.platform && tgAp
 
 function hap(kind) {
   try {
-    if (!hasTg || !tgApp.HapticFeedback) return;
+    if (!hasTg || !tgApp.HapticFeedback) { if (navigator.vibrate && S && S.sound !== false) navigator.vibrate(kind === 'err' ? [30, 40, 30] : kind === 'ok' ? [20, 30, 40] : 12); return; }
     if (kind === 'ok' || kind === 'err' || kind === 'warn') tgApp.HapticFeedback.notificationOccurred(kind === 'ok' ? 'success' : kind === 'err' ? 'error' : 'warning');
     else tgApp.HapticFeedback.impactOccurred(kind || 'light');
   } catch (e) { }
 }
 function toast(t, err) {
   const el = $('#toast'); el.innerHTML = `<div class="${err ? 'err' : ''}">${t}</div>`;
-  hap(err ? 'err' : 'light');
+  hap(err ? 'err' : 'light'); if (err) sfx('err');
   clearTimeout(toast.t); toast.t = setTimeout(() => el.innerHTML = '', 2400);
 }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -72,7 +72,7 @@ function render() {
   if (UI.modal) renderModal();
   syncBack();
 }
-function commit() { save(); render(); }
+function commit() { checkAch(); save(); render(); }
 
 function renderTop() {
   $('#top').innerHTML = `
@@ -85,7 +85,7 @@ function renderTabs() {
   const offers = S.garage.reduce((n, g) => n + (g.sale ? g.offers.filter(o => !o.caught).length : 0), 0);
   const t = (k, n, ic, badge) => `<button class="tab ${UI.tab === k ? 'on' : ''}" data-a="tab" data-k="${k}">${ic}<span>${n}</span>${badge ? `<span class="badge">${badge}</span>` : ''}</button>`;
   $('#tabs').innerHTML = t('ads', 'Объявления', I.ads) + t('garage', 'Гараж', I.garage, S.garage.length ? S.garage.length + '/' + S.slots : '') +
-    t('sale', 'Продажа', I.tag, offers) + t('wh', 'Склад', I.box, S.wh.last !== S.day && whDay(S.day).coef > 1 ? '🔥' : '') + t('me', 'Профиль', I.user);
+    t('sale', 'Продажа', I.tag, offers) + t('wh', 'Склад', I.box, S.wh.last !== S.day && whDay(S.day).coef > 1 ? '🔥' : '') + t('me', 'Профиль', I.user, tasksReady());
 }
 
 // ---------- объявления ----------
@@ -104,8 +104,9 @@ function viewAds() {
   const opt = (v, n, cur) => `<option value="${v}" ${String(cur) === String(v) ? 'selected' : ''}>${n}</option>`;
   const seg = `<div class="seg"><button class="${UI.adsMode !== 'lots' ? 'on' : ''}" data-a="adsmode" data-k="cars">Машины</button><button class="${UI.adsMode === 'lots' ? 'on' : ''}" data-a="adsmode" data-k="lots">Гаражи с сюрпризом <span class="cnt">${S.lots.filter(x => !x.gone).length}</span></button></div>`;
   if (UI.adsMode === 'lots') return `<div class="screen-title h">Объявления</div>${seg}${viewLots()}`;
+  const ev = curEvent();
   return `
-  <div class="screen-title h">Объявления</div>${seg}
+  <div class="screen-title h">Объявления</div>${ev ? `<div class="evbanner"><b>📈 ${esc(ev.n)}</b> · ещё ${S.event.until - S.day + 1} дн.<span>${esc(ev.t)}</span></div>` : ''}${seg}
   <div class="filters">
     <div class="sel"><select data-f="cls">${opt('', 'Все классы', f.cls)}${Object.entries(CLASSES).map(([k, n]) => opt(k, n, f.cls)).join('')}</select></div>
     <div class="sel"><select data-f="brand">${opt('', 'Все марки', f.brand)}${BRANDS.map(b => opt(b, b, f.brand)).join('')}</select></div>
@@ -201,7 +202,7 @@ function checkBtn(done, what, name, cost, icon, id) {
 function doCheck(l, what) {
   const cost = what === 'insp' ? inspectPrice(l) : PRICES[what === 'auto' ? 'autoteka' : 'probiv'];
   if (!canPay(cost)) return toast('Не хватает денег', true);
-  pay(cost); l.car.k[what] = true; hap('medium');
+  pay(cost); l.car.k[what] = true; hap('medium'); track('check');
   commit();
   openReport(l.car, what);
 }
@@ -302,7 +303,7 @@ function modalCall(m) {
 function doBuy(l) {
   const err = buyListing(l);
   if (err) return toast(err, true);
-  hap('ok'); UI.modal = null; UI.page = null; UI.tab = 'garage';
+  hap('ok'); sfx('cash'); UI.modal = null; UI.page = null; UI.tab = 'garage';
   toast('Машина в гараже!');
   commit();
 }
@@ -324,7 +325,7 @@ function garageBanner() {
   const room = up('room'), names = ['Голый бетон', 'Покрашенные стены', 'Плитка и свет', 'Лофт с диваном'];
   const have = UPGRADES.filter(u => up(u.k) && u.k !== 'room').map(u => u.lv ? u.lv[up(u.k) - 1] : u.n);
   return `<div class="gbanner room${room} ${up('sign') ? 'sign' : ''} ${up('lift') ? 'lift' : ''}">
-    ${up('sign') ? '<div class="gsign">PEREKUP</div>' : ''}
+    ${up('sign') || up('salon') ? `<div class="gsign">${up('salon') ? 'АВТОСАЛОН ' : ''}PEREKUP</div>` : ''}
     <div class="ginfo"><b>${names[room]}</b><span>${have.length ? have.join(' · ') : 'Пока ничего нет, кроме ведра и тряпки'}</span></div></div>`;
 }
 function upRow(u) {
@@ -332,7 +333,7 @@ function upRow(u) {
   const name = u.lv ? (lv ? u.lv[lv - 1] : u.n) : u.n;
   const next = u.lv && lv < max ? u.lv[lv] : null;
   return `<div class="uprow"><div style="flex:1;min-width:0"><b>${esc(next && lv ? next : name)}</b>${max > 1 ? `<span class="lvl">${lv}/${max}</span>` : ''}<div class="sub">${esc(u.t)}</div></div>
-    ${p == null ? '<span class="chip green">Есть</span>' : `<button class="btn small" data-a="upgrade" data-k="${u.k}">${money(p)}</button>`}</div>`;
+    ${p == null ? '<span class="chip green">Есть</span>' : u.minLv && level().i < u.minLv ? `<span class="chip">🔒 ${LEVELS[u.minLv][1]}</span>` : `<button class="btn small" data-a="upgrade" data-k="${u.k}">${money(p)}</button>`}</div>`;
 }
 
 // ---------- гаражи с сюрпризом ----------
@@ -556,12 +557,38 @@ function viewMe() {
       <div class="kv"><span>День карьеры</span><b>${S.day}</b></div>
     </div>
   </div>
+  ${viewTasks()}${viewBank()}${viewAch()}
   <div class="panel flat"><div class="h" style="font-size:13px;margin-bottom:4px">Журнал</div>
     <div class="log">${S.log.slice(0, 25).map(x => `<div><span>Д${x.d}</span>${esc(x.t)}</div>`).join('')}</div></div>
   <div class="grid2"><button class="btn dark" data-a="help">${I.help}Как играть</button><button class="btn red" data-a="reset">Начать заново</button></div>
   <button class="btn block dark" style="margin-top:10px" data-a="avatar">${I.user}Изменить персонажа</button>
+  <button class="btn block dark" style="margin-top:10px" data-a="sound">${S.sound === false ? '🔇 Звук выключен' : '🔊 Звук и вибрация включены'}</button>
   <button class="btn block dark" style="margin-top:10px" data-a="credits">Фото машин: авторы</button>
-  <div class="note" style="margin-top:14px;text-align:center">Perekup 0.4 · сохраняется сам: в Telegram и на телефоне</div>`;
+  <div class="note" style="margin-top:14px;text-align:center">Perekup 0.5 · сохраняется сам: в Telegram и на телефоне</div>`;
+}
+function viewTasks() {
+  return `<div class="panel"><div class="sec-title">Задания дня</div>${S.daily.tasks.map((x, i) => `<div class="task ${x.claimed ? 'done' : ''}">
+    <div style="flex:1;min-width:0"><b>${esc(taskText(x))}</b><div class="bar"><i style="width:${Math.min(1, x.got / x.need) * 100}%"></i></div>
+      <span class="sub">${Math.min(x.got, x.need)}/${x.need} · награда ${money(x.reward)}</span></div>
+    ${x.claimed ? '<span class="chip green">Получено</span>' : x.got >= x.need ? `<button class="btn small green" data-a="claim" data-k="${i}">Забрать</button>` : ''}</div>`).join('')}
+    <div class="note">Новые задания каждое утро.</div></div>`;
+}
+function viewBank() {
+  const L = S.loan, max = loanMax();
+  if (L) return `<div class="panel"><div class="sec-title">Банк</div>
+    <div class="kv"><span>Кредит</span><b>${money(L.sum)}</b></div><div class="kv"><span>Осталось вернуть</span><b>${money(L.left)}</b></div>
+    <div class="kv"><span>Платёж каждый день</span><b>${money(L.daily)}</b></div>
+    <button class="btn block" style="margin-top:8px" data-a="repay">Погасить всё сейчас</button>
+    <div class="note">Если долго сидеть в минусе — позвонят коллекторы, репутация упадёт.</div></div>`;
+  const sums = [...new Set([max / 4, max / 2, max].map(roundPrice))];
+  return `<div class="panel"><div class="sec-title">Банк</div>
+    <div class="sub">Кредит на ${LOAN_DAYS} дней, переплата ${LOAN_RATE * 100}%. Платёж списывается каждое утро. Чем выше уровень, тем больше дают.</div>
+    <div class="grid3" style="margin-top:10px">${sums.map(v => `<button class="btn small dark" data-a="loan" data-k="${v}">${money(v)}</button>`).join('')}</div></div>`;
+}
+function viewAch() {
+  const got = ACH.filter(a => S.ach[a.k]).length;
+  return `<div class="panel"><div class="sec-title">Достижения <span class="sub">${got} из ${ACH.length}</span></div>
+    <div class="achs">${ACH.map(a => `<div class="ach ${S.ach[a.k] ? 'on' : ''}"><b>${S.ach[a.k] ? '🏆' : '🔒'} ${esc(a.n)}</b><small>${esc(a.t)}</small></div>`).join('')}</div></div>`;
 }
 function modalHelp() {
   return `<div class="panel"><button class="x" data-a="mclose">${I.x}</button><div class="title-plate h">Как стать перекупом</div>
@@ -576,6 +603,7 @@ function modalHelp() {
       <div>📦 <b>Склад Ozon</b>: кончились деньги — выйди на смену на СЦ Волхонское. Ромашка (буквы A–K), приёмка, аллея или грузчик. Коэффициент и спидометр как в жизни.</div>
       <div>🔒 <b>Гаражи с сюрпризом</b> — во вкладке объявлений: покупаешь гараж целиком, внутри случайная тачка.</div>
       <div>🛠 <b>Улучшения</b> — во вкладке «Гараж»: инструменты, подъёмник, покраска, мойка, вывеска, ремонт помещения.</div>
+      <div>📋 <b>Задания дня</b>, <b>банк</b> и <b>достижения</b> — в профиле. Следи за событиями рынка: на санкциях и моде на ретро можно поднять.</div>
       <div>🧍 <b>Персонаж</b>: нажми на человечка слева сверху — имя, причёска, шмот.</div>
     </div>
     <button class="btn block" style="margin-top:12px" data-a="mclose">Погнали</button></div>`;
@@ -652,7 +680,7 @@ document.addEventListener('click', e => {
     case 'offer': {
       const l = L(), x = l.ask * UI.offerPct[id] / 100, r = offerPrice(l, x);
       UI.offerPct[id] = clamp(Math.round(x / l.ask * 100) + 2, 50, 100);
-      hap(r === 'deal' ? 'ok' : r === 'hangup' ? 'err' : 'medium'); commit(); break;
+      hap(r === 'deal' ? 'ok' : r === 'hangup' ? 'err' : 'medium'); if (r === 'deal') sfx('coin'); commit(); break;
     }
     case 'buy': doBuy(L()); break;
     case 'inspect': G().car.k.insp = true; hap('medium'); commit(); break;
@@ -661,13 +689,17 @@ document.addEventListener('click', e => {
     case 'dofix': { const err = repair(UI.modal.g, UI.modal.pk, t.dataset.diy === '1'); closeModal(); if (err) toast(err, err === 'Не хватает денег'); else { toast('Готово! 🔧'); hap('ok'); } commit(); break; }
     case 'ozonfix': { const err = orderOzon(UI.modal.g, UI.modal.pk); closeModal(); if (err) toast(err, true); else { toast('Заказал на Ozon 📦 Жди доставку'); hap('ok'); } commit(); break; }
     case 'credits': UI.modal = { type: 'credits' }; render(); break;
+    case 'claim': claimTask(+t.dataset.k); hap('ok'); commit(); break;
+    case 'loan': { const v = +t.dataset.k; confirmBox('Взять кредит?', `Получишь <b>${money(v)}</b>, вернёшь <b>${money(Math.round(v * (1 + LOAN_RATE)))}</b> за ${LOAN_DAYS} дней.`, 'Беру', () => { const err = takeLoan(v); err ? toast(err, true) : (toast('Деньги на счёте'), sfx('coin')); }); break; }
+    case 'repay': { const err = repayLoan(); err ? toast(err, true) : (toast('Кредит закрыт'), sfx('coin')); commit(); break; }
+    case 'sound': S.sound = S.sound === false; if (S.sound) sfx('coin'); commit(); break;
     case 'adsmode': UI.adsMode = t.dataset.k; hap('light'); render(); $('#view').scrollTop = 0; break;
     case 'lot': UI.modal = { type: 'lot', id }; hap('medium'); render(); break;
     case 'lotoffer': { const lot = S.lots.find(x => x.id === id), r = lotOffer(lot, lot.ask * (UI.lotPct[id] || 80) / 100);
       UI.lotPct[id] = clamp(Math.round((UI.lotPct[id] || 80) + 3), 40, 100); hap(r === 'deal' ? 'ok' : r === 'gone' ? 'err' : 'medium');
       commit(); break; }
     case 'buylot': { const lot = S.lots.find(x => x.id === id), uid = lot.car.uid, err = buyLot(lot); if (err) return toast(err, true);
-      hap('ok'); UI.modal = { type: 'reveal', uid }; commit(); break; }
+      hap('ok'); sfx('door'); UI.modal = { type: 'reveal', uid }; commit(); break; }
     case 'upgrade': { const err = buyUpgrade(t.dataset.k); err ? toast(err, true) : (toast('Гараж прокачан'), hap('ok')); commit(); break; }
     case 'avatar': openAvatar(); break;
     case 'av': { const d = UI.modal.draft, k = t.dataset.k; d[k] = ['skin', 'hairC', 'topC'].includes(k) ? +t.dataset.v : t.dataset.v; hap('light');
@@ -684,7 +716,7 @@ document.addEventListener('click', e => {
     case 'slot': { const p = slotPrice(); confirmBox('Ещё одно место?', `Купить место в гараже за <b>${money(p)}</b>? Аренда вырастет на 700 ₽ в день.`, 'Купить', () => { const err = buySlot(); err ? toast(err, true) : toast('Место куплено'); }); break; }
     case 'accept': {
       const g = G(), o = g.offers.find(x => x.id === +t.dataset.o);
-      const profit = finishSale(g, o.offer, o.name); hap('ok');
+      const profit = finishSale(g, o.offer, o.name); hap('ok'); sfx('cash');
       toast((profit >= 0 ? 'Продано! Навар ' : 'Продано. Минус ') + money(Math.abs(profit)), profit < 0);
       if (UI.page && UI.page.uid === uid) { UI.page = null; $('#page').className = ''; }
       commit(); break;

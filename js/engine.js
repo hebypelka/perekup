@@ -40,6 +40,7 @@ function newGame() {
   };
   for (let i = 0; i < 14; i++) S.listings.push(genListing(ri(0, 2)));
   S.up = {}; S.lots = []; refreshLots();
+  extrasInit();
   addLog('Начал карьеру перекупа с ' + money(START_MONEY) + ' в кармане.');
 }
 
@@ -74,7 +75,7 @@ function partBase(car) {
 // Рыночная цена «как на Авито»: такая же машина того же года и пробега в среднем состоянии
 function marketRef(car) {
   const w = {}; PARTS.forEach(p => w[p.k] = 18);
-  return roundPrice(valueOf(car, { km: car.kmShown, wear: w, acc: 0, owners: Math.min(car.ownersSaid, 3), taxi: false }));
+  return roundPrice(valueOf(car, { km: car.kmShown, wear: w, acc: 0, owners: Math.min(car.ownersSaid, 3), taxi: false }) * eventMul(car));
 }
 function trueView(car) { return { km: car.km, wear: car.wear, acc: car.acc, owners: car.owners, taxi: car.taxi }; }
 function trueValue(car) { return valueOf(car, trueView(car)); }
@@ -110,7 +111,7 @@ function flipEstimate(car) {
   const v = knownView(car), fixed = Object.assign({}, v, { wear: {} });
   let cost = 0;
   PARTS.forEach(p => { fixed.wear[p.k] = 0; if (v.wear[p.k] > 20) cost += p.share * partBase(car) * v.wear[p.k] / 100 * 0.85; else fixed.wear[p.k] = v.wear[p.k]; });
-  return { sell: valueOf(car, fixed), repair: cost };
+  return { sell: valueOf(car, fixed) * eventMul(car), repair: cost };
 }
 
 // ---------- генерация ----------
@@ -299,6 +300,7 @@ function buyListing(l) {
   S.listings = S.listings.filter(x => x !== l);
   S.stats.bought++;
   addLog('Купил ' + carName(c) + ' за ' + money(price) + '.');
+  track('buy', { car: c }); if (price <= l.ask0 * 0.9) track('haggle');
   return null;
 }
 
@@ -311,9 +313,11 @@ function repair(g, pk, diy) {
   if (diy) {
     const fail = chance(diyFail());
     c.wear[pk] = fail ? Math.round(c.wear[pk] * 0.8) : Math.round(c.wear[pk] * (up('lift') ? rnd(0.06, 0.14) : rnd(0.2, 0.35)));
+    track('repair');
     return fail ? 'Руки из жопы: починил так себе' : null;
   }
   c.wear[pk] = ri(0, 3);
+  track('repair');
   return null;
 }
 // Запчасть с Ozon: дешевле, но едет 1–3 дня и бывает пересорт. Ставишь сам.
@@ -363,6 +367,7 @@ function shiftPay(ppc, good, d) {
   return { picks, base, bonus, total: base + bonus };
 }
 function finishShift(title, res) {
+  track('shift');
   S.money += res.total;
   S.wh.last = S.day; S.wh.shifts++; S.wh.earned += res.total; S.wh.best = Math.max(S.wh.best, res.total);
   addLog('Смена на ' + WH.name + ' (' + title + '): ' + res.picks + ' пиков, ' + money(res.total) + '.');
@@ -370,17 +375,19 @@ function finishShift(title, res) {
 
 const diyFail = () => Math.max(0.015, 0.12 - 0.035 * up('tools'));
 const washPrice = () => up('wash') ? 500 : PRICES.wash;
-function wash(g) { const p = washPrice(); if (!canPay(p)) return 'Не хватает денег'; pay(p); g.spent += p; g.car.clean = true; return null; }
+function wash(g) { const p = washPrice(); if (!canPay(p)) return 'Не хватает денег'; pay(p); g.spent += p; g.car.clean = true; track('wash'); return null; }
 function upPrice(u) { const lv = up(u.k); return lv < u.price.length ? u.price[lv] : null; }
 function buyUpgrade(k) {
   const u = UPGRADES.find(x => x.k === k), p = upPrice(u);
   if (p == null) return 'Уже максимум';
+  if (u.minLv && level().i < u.minLv) return 'Нужен уровень «' + LEVELS[u.minLv][1] + '»';
   if (!canPay(p)) return 'Не хватает денег';
   pay(p); S.up[k] = up(k) + 1;
+  if (k === 'salon') { S.slots += 3; S.rep = clamp(S.rep + 10, 0, 100); }
   addLog('Гараж: ' + (u.lv ? u.lv[S.up[k] - 1] : u.n) + ' за ' + money(p) + '.');
   return null;
 }
-const trustMul = () => 1 + 0.015 * up('room');
+const trustMul = () => 1 + 0.015 * up('room') + 0.04 * up('salon');
 function twist(g) {
   const c = g.car;
   if (!canPay(PRICES.twist)) return 'Не хватает денег';
@@ -393,10 +400,10 @@ function clearLimit(g) { const s = g.car.legal.limit + 1500; if (!canPay(s)) ret
 function checkOwn(g, what) {
   const cost = PRICES[what === 'auto' ? 'autoteka' : 'probiv'];
   if (!canPay(cost)) return 'Не хватает денег';
-  pay(cost); g.spent += cost; g.car.k[what] = true; return null;
+  pay(cost); g.spent += cost; g.car.k[what] = true; track('check'); return null;
 }
 function marketPrice(g) {
-  return roundPrice(valueOf(g.car, buyerView(g.car, false)) * (1 + (S.rep - 50) / 600) * (g.car.clean ? 1.03 : 1) * trustMul());
+  return roundPrice(valueOf(g.car, buyerView(g.car, false)) * (1 + (S.rep - 50) / 600) * (g.car.clean ? 1.03 : 1) * trustMul() * eventMul(g.car));
 }
 function listForSale(g, price) { g.sale = { price: roundPrice(price), day: S.day }; g.offers = []; }
 function unlist(g) { g.sale = null; g.offers = []; }
@@ -413,24 +420,25 @@ function finishSale(g, price, who) {
   S.garage = S.garage.filter(x => x !== g);
   addLog('Продал ' + carName(g.car) + ' (' + who + ') за ' + money(price) + '. ' + (profit >= 0 ? 'Навар ' : 'Минус ') + money(Math.abs(profit)) + '.');
   if (g.car.twisted) S.sold = (S.sold || []).concat([{ name: carName(g.car), day: S.day }]);
+  track('sell', { profit });
   return profit;
 }
 function slotPrice() { return 200000 * Math.pow(2, S.slots - 2); }
-function buySlot() { const p = slotPrice(); if (S.slots >= 8) return 'Больше мест нет'; if (!canPay(p)) return 'Не хватает денег'; pay(p); S.slots++; return null; }
+function buySlot() { const p = slotPrice(); if (S.slots >= 8 + 3 * up('salon')) return 'Больше мест нет'; if (!canPay(p)) return 'Не хватает денег'; pay(p); S.slots++; return null; }
 
 // ---------- покупатели ----------
 function genOffers(g) {
   const c = g.car, md = MODELS[c.m], mp = marketPrice(g), price = g.sale.price;
   const ratio = price / mp;
   const demand = { econ: 1.3, mid: 1.15, biz: 0.9, prem: 0.7, suv: 1.1, sport: 0.8, classic: 0.7, moto: 0.8, comm: 0.9 }[md.cls] || 1;
-  const lambda = 1.5 * clamp((1.28 - ratio) / 0.35, 0.04, 1.7) * demand * (0.6 + S.rep / 125) * (up('sign') ? 1.2 : 1);
+  const lambda = 1.5 * clamp((1.28 - ratio) / 0.35, 0.04, 1.7) * demand * (0.6 + S.rep / 125) * (up('sign') ? 1.2 : 1) * (up('salon') ? 1.3 : 1);
   let n = 0; let L = Math.exp(-lambda), p = 1; do { n++; p *= Math.random(); } while (p > L); n--;
   const out = [];
   for (let i = 0; i < Math.min(n, 4); i++) {
     const b = wpick(BUYERS, x => x.k === 'boss' ? (md.cls === 'prem' || md.cls === 'sport' ? 3 : 0.5) : x.k === 'granny' ? 0.4
       : x.k === 'klad' ? (isPayday(S.day) && price < 1500000 ? 4 : 0.4) : x.k === 'podryad' ? (md.cls === 'comm' ? 3 : 0) : 1.5);
     const checks = chance(b.check + (price > 1500000 ? 0.2 : 0));
-    let v = valueOf(c, buyerView(c, checks)) * (1 + (S.rep - 50) / 600) * (c.clean ? 1.03 : 1) * trustMul();
+    let v = valueOf(c, buyerView(c, checks)) * (1 + (S.rep - 50) / 600) * (c.clean ? 1.03 : 1) * trustMul() * eventMul(c);
     const name = pick(b.name);
     if (checks && c.twisted) {
       S.rep = clamp(S.rep - 5, 0, 100); S.stats.caught++;
@@ -505,6 +513,7 @@ function nextDay() {
       return true;
     });
   }
+  extrasDay(ev);
   return ev;
 }
 // ---------- гаражи с сюрпризом ----------
@@ -547,6 +556,7 @@ function buyLot(lot) {
   S.lots = S.lots.filter(x => x !== lot);
   S.stats.bought++;
   addLog('Купил «' + LOT_TYPES[lot.type].n.toLowerCase() + '» за ' + money(lot.deal) + ', а там ' + carName(lot.car) + '.');
+  track('buy', { car: lot.car }); track('lot', { car: lot.car, paid: lot.deal });
   return null;
 }
 
@@ -607,6 +617,7 @@ async function load() {
   if (!S.wh) S.wh = newWh();
   if (!S.up) S.up = {};
   if (!S.lots) { S.lots = []; refreshLots(); }
+  extrasInit();
 }
 function resetGame() {
   try { localStorage.removeItem(SAVE_KEY); } catch (e) { }

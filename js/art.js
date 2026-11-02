@@ -173,6 +173,7 @@ function sceneClass(car) { return 'scene scene-' + car.scene; }
 
 // Реальное фото модели (Wikimedia Commons). SVG остаётся под ним: если фото не загрузится, будет видна нарисованная машина.
 function carPic(car) {
+  if (car.photo) return `<img class="photo own" src="${car.photo}" alt="">`;
   const ph = typeof PHOTOS !== 'undefined' && PHOTOS[car.m];
   if (!ph || !ph.length) return carSvg(car);
   const p = ph[(car.ph != null ? car.ph : car.uid) % ph.length];

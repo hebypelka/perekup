@@ -2,7 +2,7 @@
 
 const SHIFT_SEC = 45;
 const FLOW_K = { low: 1.6, norm: 1, high: 0.75 }; // как день на складе меняет поток товара
-const LETTER_COL = { A: '#e5463b', B: '#f6c21c', C: '#2f9cf0', D: '#8bd43a', E: '#b56cf0', K: '#ff8a3d', Q: '#ff8a3d' };
+const LETTER_COL = { A: '#e5463b', B: '#f6c21c', C: '#2f9cf0', D: '#8bd43a', E: '#b56cf0', K: '#ff8a3d' };
 let GM = null;
 
 // ---------- вкладка ----------
@@ -96,7 +96,9 @@ function nextItem() {
     const heavy = GM.L.heavy, dg = pickDigit(GM.L.d);
     GM.cur = { digit: dg, name: pick(heavy ? WH.big : WH.goods), kg: heavy ? ri(40, 120) : ri(1, 35), held: !heavy };
   } else if (GM.kind === 'priemka') {
-    const letter = wpick(['A', 'B', 'C', 'D', 'E', 'Q'], x => ({ A: 30, B: 22, C: 22, D: 14, E: 5, Q: 7 })[x]);
+    // K приходит партиями: в начале смены её много, потом почти нет
+    const early = (Date.now() - GM.t0) / 1000 < SHIFT_SEC * 0.45;
+    const letter = wpick(['A', 'B', 'C', 'D', 'E', 'K'], x => ({ A: 30, B: 22, C: 22, D: 14, E: 5, K: early ? 12 : 1 })[x]);
     const defect = chance(0.2) ? pick(WH.defects) : null;
     GM.cur = { letter, defect, name: pick(letter === 'E' ? WH.big : WH.goods), kg: letter === 'E' ? ri(40, 120) : ri(80, 400) };
   } else if (GM.kind === 'alleya') {
@@ -105,7 +107,7 @@ function nextItem() {
 }
 function newTruck() {
   GM.phase = 'unload';
-  GM.truck = [0, 1].map(() => Array.from({ length: 6 }, () => pick(['A', 'A', 'B', 'C', 'D', 'E', 'Q'])));
+  GM.truck = [0, 1].map(() => Array.from({ length: 6 }, () => pick(['A', 'A', 'B', 'C', 'D', 'E', 'K'])));
 }
 function newLoad() {
   GM.phase = 'load';
@@ -158,8 +160,7 @@ function drawPriemka() {
       ${c.defect && c.defect !== 'нет штрихкода' ? `<div class="gm-tag bad">${c.defect}</div>` : '<div class="gm-tag ok">упаковка целая</div>'}`
     : '<small class="sub">ждём фуру…</small>'}</div>
     <div class="gm-keys">${keys}</div>
-    <button class="btn block red" style="margin-top:8px" data-g="brak">В брак</button>
-    <div class="note" style="text-align:center">Палеты Q — это буква K</div>`;
+    <button class="btn block red" style="margin-top:8px" data-g="brak">В брак</button>`;
 }
 function drawAlleya() {
   const c = GM.cur, CAP = 8;
@@ -224,11 +225,11 @@ function onTap(g, t) {
     GM.flash = { i, k: ok ? 'ok' : 'bad' };
     answer(ok, ok ? null : 'Пересорт! Это ячейка ' + (i + 1) + ', а надо ' + c.digit);
   } else if (GM.kind === 'priemka') {
-    const need = c.letter === 'Q' ? 'K' : c.letter;
+    const need = c.letter;
     if (g === 'brak') answer(!!c.defect, c.defect ? 'В брак, верно' : 'Нормальный палет в брак!');
     else if (g === 'let') {
       if (c.defect) return answer(false, 'Пропустил брак: ' + c.defect);
-      answer(t.dataset.k === need, t.dataset.k === need ? null : 'Не та буква! Это ' + need + (c.letter === 'Q' ? ' (Q идёт на K)' : ''));
+      answer(t.dataset.k === need, t.dataset.k === need ? null : 'Не та буква! Это ' + need);
     }
   } else if (GM.kind === 'alleya' && g === 'box') {
     const i = +t.dataset.i;

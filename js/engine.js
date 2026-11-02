@@ -39,6 +39,7 @@ function newGame() {
     wh: newWh(),
   };
   for (let i = 0; i < 14; i++) S.listings.push(genListing(ri(0, 2)));
+  S.up = {}; S.lots = []; refreshLots();
   addLog('Начал карьеру перекупа с ' + money(START_MONEY) + ' в кармане.');
 }
 
@@ -55,7 +56,7 @@ function age(car) { return Math.max(0.5, YEAR_NOW - car.year); }
 // Цена машины, если смотреть на неё вот так (view: пробег, износ узлов, ДТП, владельцы, такси)
 function valueOf(car, v) {
   const md = MODELS[car.m], a = age(car);
-  let base = md.priceNew * Math.max(0.08, Math.pow(0.87, a));
+  let base = car.tune || md.priceNew * Math.max(0.08, Math.pow(0.87, a));
   if (md.classic && a > 22) base *= 1 + Math.min(2, (a - 22) * 0.06);
   const exp = a * (md.body === 'moto' ? 5000 : 16000);
   const mf = clamp(1 + (exp - v.km) / (exp + 80000) * 0.3, 0.55, 1.12);
@@ -69,6 +70,11 @@ function valueOf(car, v) {
 function partBase(car) {
   const full = {}; PARTS.forEach(p => full[p.k] = 0);
   return valueOf(car, { km: car.km, wear: full, acc: 0, owners: 1, taxi: false });
+}
+// Рыночная цена «как на Авито»: такая же машина того же года и пробега в среднем состоянии
+function marketRef(car) {
+  const w = {}; PARTS.forEach(p => w[p.k] = 18);
+  return roundPrice(valueOf(car, { km: car.kmShown, wear: w, acc: 0, owners: Math.min(car.ownersSaid, 3), taxi: false }));
 }
 function trueView(car) { return { km: car.km, wear: car.wear, acc: car.acc, owners: car.owners, taxi: car.taxi }; }
 function trueValue(car) { return valueOf(car, trueView(car)); }
@@ -92,9 +98,11 @@ function buyerView(car, checked) {
   return checked ? trueView(car)
     : { km: car.kmShown, wear: car.wear, acc: 0, owners: Math.min(car.owners, 2), taxi: false };
 }
+const up = k => (S && S.up && S.up[k]) || 0;
+function partMul(pk) { return (pk === 'body' && up('paint') ? 0.5 : 1) * (pk === 'electric' && up('scanner') ? 0.6 : 1); }
 function repairCost(car, pk, diy) {
   const p = PARTS.find(x => x.k === pk);
-  return roundPrice(p.share * partBase(car) * car.wear[pk] / 100 * (diy ? 0.35 : 0.85) + (diy ? 500 : 2500));
+  return roundPrice((p.share * partBase(car) * car.wear[pk] / 100 * (diy ? 0.35 * (1 - 0.1 * up('tools')) : 0.85) + (diy ? 500 : 2500)) * partMul(pk));
 }
 
 // Примерно за сколько уйдёт, если сделать весь известный ремонт сервисом
@@ -106,9 +114,9 @@ function flipEstimate(car) {
 }
 
 // ---------- генерация ----------
-function genCar() {
+function genCar(opt = {}) {
   const lvl = S ? level().i : 0;
-  const md = wpick(MODELS, m => m.weight * (m.priceNew > 6000000 ? 0.35 + lvl * 0.25 : 1));
+  const md = wpick(MODELS, m => (opt.cls && !opt.cls.includes(m.cls) ? 0 : m.weight) * (m.priceNew > 6000000 ? 0.35 + lvl * 0.25 : 1));
   const year = ri(md.from, Math.min(md.to, YEAR_NOW));
   const a = Math.max(0.5, YEAR_NOW - year);
   const taxi = ['econ', 'mid', 'biz'].includes(md.cls) && md.body !== 'moto' && chance(0.13);
@@ -117,8 +125,8 @@ function genCar() {
   const careful = chance(md.classic ? 0.35 : 0.15); // гаражное хранение, бережный хозяин
   const wear = {};
   for (const p of PARTS) {
-    let w = (a * rnd(1.5, 4.5) + kmReal / 10000 * rnd(0.8, 2.2)) * rnd(0.4, 1.25) * (careful ? 0.45 : 1);
-    if (chance(0.12)) w += rnd(20, 45); // «сюрприз»
+    let w = (a * rnd(1.5, 4.5) + kmReal / 10000 * rnd(0.8, 2.2)) * rnd(0.4, 1.25) * (careful ? 0.45 : 1) * 0.45 * (opt.wear || 1);
+    if (chance(0.08)) w += rnd(15, 35) * (opt.wear || 1); // «сюрприз»
     wear[p.k] = Math.round(clamp(w, 0, 95));
   }
   let acc = 0; for (let i = 0; i < 3; i++) if (chance(0.1 + Math.min(0.15, a * 0.01))) acc++;
@@ -180,7 +188,7 @@ function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { co
 // ---------- проверки ----------
 function canPay(sum) { return S.money >= sum; }
 function pay(sum) { S.money -= sum; }
-function inspectPrice(l) { return roundPrice(Math.min(15000, 2500 + l.ask * 0.002)); }
+function inspectPrice(l) { return roundPrice(Math.min(15000, 2500 + l.ask * 0.002) * (up('scanner') ? 0.5 : 1)); }
 
 // Проблемы, которые игрок нашёл и может предъявить продавцу
 function foundIssues(l) {
@@ -201,11 +209,14 @@ function foundIssues(l) {
 }
 
 // ---------- торг ----------
-function say(l, who, t) { l.chat.push({ w: who, t }); }
+function say(l, who, t) {
+  if (l.special === 'yan' && who === 's' && l.chat.length) t = pick(YAN_EPIC) + ' ' + t;
+  l.chat.push({ w: who, t });
+}
 
 function callSeller(l) {
   const st = SELLERS[l.seller];
-  if (!l.called) { l.called = true; say(l, 's', pick(st.hello)); }
+  if (!l.called) { l.called = true; say(l, 's', l.special === 'yan' ? 'Здарова! Да, продаю свою ласточку. Только сразу: это не просто семёрка, это семёрка Яна с приёмки.' : pick(st.hello)); }
 }
 
 function pointIssue(l, id) {
@@ -298,8 +309,8 @@ function repair(g, pk, diy) {
   if (!canPay(cost)) return 'Не хватает денег';
   pay(cost); g.spent += cost;
   if (diy) {
-    const fail = chance(0.12);
-    c.wear[pk] = fail ? Math.round(c.wear[pk] * 0.8) : Math.round(c.wear[pk] * rnd(0.2, 0.35));
+    const fail = chance(diyFail());
+    c.wear[pk] = fail ? Math.round(c.wear[pk] * 0.8) : Math.round(c.wear[pk] * (up('lift') ? rnd(0.06, 0.14) : rnd(0.2, 0.35)));
     return fail ? 'Руки из жопы: починил так себе' : null;
   }
   c.wear[pk] = ri(0, 3);
@@ -357,7 +368,19 @@ function finishShift(title, res) {
   addLog('Смена на ' + WH.name + ' (' + title + '): ' + res.picks + ' пиков, ' + money(res.total) + '.');
 }
 
-function wash(g) { if (!canPay(PRICES.wash)) return 'Не хватает денег'; pay(PRICES.wash); g.spent += PRICES.wash; g.car.clean = true; return null; }
+const diyFail = () => Math.max(0.015, 0.12 - 0.035 * up('tools'));
+const washPrice = () => up('wash') ? 500 : PRICES.wash;
+function wash(g) { const p = washPrice(); if (!canPay(p)) return 'Не хватает денег'; pay(p); g.spent += p; g.car.clean = true; return null; }
+function upPrice(u) { const lv = up(u.k); return lv < u.price.length ? u.price[lv] : null; }
+function buyUpgrade(k) {
+  const u = UPGRADES.find(x => x.k === k), p = upPrice(u);
+  if (p == null) return 'Уже максимум';
+  if (!canPay(p)) return 'Не хватает денег';
+  pay(p); S.up[k] = up(k) + 1;
+  addLog('Гараж: ' + (u.lv ? u.lv[S.up[k] - 1] : u.n) + ' за ' + money(p) + '.');
+  return null;
+}
+const trustMul = () => 1 + 0.015 * up('room');
 function twist(g) {
   const c = g.car;
   if (!canPay(PRICES.twist)) return 'Не хватает денег';
@@ -373,7 +396,7 @@ function checkOwn(g, what) {
   pay(cost); g.spent += cost; g.car.k[what] = true; return null;
 }
 function marketPrice(g) {
-  return roundPrice(valueOf(g.car, buyerView(g.car, false)) * (1 + (S.rep - 50) / 600) * (g.car.clean ? 1.03 : 1));
+  return roundPrice(valueOf(g.car, buyerView(g.car, false)) * (1 + (S.rep - 50) / 600) * (g.car.clean ? 1.03 : 1) * trustMul());
 }
 function listForSale(g, price) { g.sale = { price: roundPrice(price), day: S.day }; g.offers = []; }
 function unlist(g) { g.sale = null; g.offers = []; }
@@ -400,14 +423,14 @@ function genOffers(g) {
   const c = g.car, md = MODELS[c.m], mp = marketPrice(g), price = g.sale.price;
   const ratio = price / mp;
   const demand = { econ: 1.3, mid: 1.15, biz: 0.9, prem: 0.7, suv: 1.1, sport: 0.8, classic: 0.7, moto: 0.8, comm: 0.9 }[md.cls] || 1;
-  const lambda = 1.5 * clamp((1.28 - ratio) / 0.35, 0.04, 1.7) * demand * (0.6 + S.rep / 125);
+  const lambda = 1.5 * clamp((1.28 - ratio) / 0.35, 0.04, 1.7) * demand * (0.6 + S.rep / 125) * (up('sign') ? 1.2 : 1);
   let n = 0; let L = Math.exp(-lambda), p = 1; do { n++; p *= Math.random(); } while (p > L); n--;
   const out = [];
   for (let i = 0; i < Math.min(n, 4); i++) {
     const b = wpick(BUYERS, x => x.k === 'boss' ? (md.cls === 'prem' || md.cls === 'sport' ? 3 : 0.5) : x.k === 'granny' ? 0.4
       : x.k === 'klad' ? (isPayday(S.day) && price < 1500000 ? 4 : 0.4) : x.k === 'podryad' ? (md.cls === 'comm' ? 3 : 0) : 1.5);
     const checks = chance(b.check + (price > 1500000 ? 0.2 : 0));
-    let v = valueOf(c, buyerView(c, checks)) * (1 + (S.rep - 50) / 600) * (c.clean ? 1.03 : 1);
+    let v = valueOf(c, buyerView(c, checks)) * (1 + (S.rep - 50) / 600) * (c.clean ? 1.03 : 1) * trustMul();
     const name = pick(b.name);
     if (checks && c.twisted) {
       S.rep = clamp(S.rep - 5, 0, 100); S.stats.caught++;
@@ -454,6 +477,8 @@ function nextDay() {
   S.listings.forEach(l => { if (!l.gone && !l.deal) l.patience = Math.max(l.patience, 1); });
 
   deliverOrders(ev);
+  refreshLots();
+  if (!S.yanDone && S.day >= 3 && chance(0.4)) { S.listings.unshift(genYanListing()); S.yanDone = true; ev.push({ t: '👀 Новое объявление от Яна с приёмки', s: 'ВАЗ 2107 «Хамелеон» — глянь в объявлениях' }); }
   if (isPayday(S.day)) ev.push({ t: '💸 День зарплаты на складе', s: 'кладовщики при деньгах — покупателей больше' });
   // Гараж: менты за краденым, покупатели
   for (const g of S.garage.slice()) {
@@ -482,8 +507,64 @@ function nextDay() {
   }
   return ev;
 }
+// ---------- гаражи с сюрпризом ----------
+function genLot() {
+  const T = pick(LOT_TYPES), car = genCar({ cls: T.cls, wear: T.wear });
+  const md = MODELS[car.m];
+  if (chance(T.docs)) { if (chance(0.5)) car.legal.zalog = roundPrice(trueValue(car) * rnd(0.15, 0.5)); else car.legal.limit = roundPrice(rnd(5000, 60000)); }
+  if (T.k === 'abandon') { car.clean = false; car.kmShown = car.km; }
+  const ask = roundPrice(Math.max(30000, trueValue(car) * rnd(T.f[0], T.f[1])));
+  const hints = ['Сквозь щель в воротах: ' + BODY_NAMES[md.body] + '.'];
+  if (chance(0.45)) hints.push('На ключах брелок ' + md.brand + '.');
+  if (chance(0.35)) hints.push('Год примерно ' + (Math.round(car.year / 5) * 5) + '-й.');
+  return { id: S.nextId++, type: LOT_TYPES.indexOf(T), car, ask, ask0: ask, floor: roundPrice(ask * rnd(0.74, 0.88)), patience: 3, deal: 0, chat: [],
+    seller: pick(LOT_SELLERS), city: pick(['Санкт-Петербург', 'Мурино', 'Кудрово', 'Колпино', 'Гатчина', 'Петергоф', 'Всеволожск']), hints, until: S.day + ri(2, 4) };
+}
+function refreshLots() {
+  S.lots = (S.lots || []).filter(x => x.until >= S.day && !x.gone);
+  while (S.lots.length < 3) S.lots.push(genLot());
+}
+function lotOffer(lot, x) {
+  x = roundPrice(x);
+  lot.chat.push({ w: 'p', t: 'Отдадите за ' + money(x) + '?' });
+  const s = t => lot.chat.push({ w: 's', t });
+  if (x >= lot.ask) { lot.deal = lot.ask; s('Забирай, ключи у меня.'); return 'deal'; }
+  if (x >= lot.floor) {
+    lot.patience--;
+    if (x >= lot.floor + (lot.ask - lot.floor) * 0.6 || lot.patience <= 0) { lot.deal = x; s('Ладно, по рукам. Только что внутри — сам разбирайся.'); return 'deal'; }
+    lot.ask = Math.max(lot.floor, roundPrice((x + lot.ask) / 2)); s('Не, давай ' + money(lot.ask) + ', там же машина целая. Наверное.'); return 'counter';
+  }
+  lot.patience -= x < lot.floor * 0.8 ? 2 : 1;
+  if (lot.patience <= 0) { lot.gone = true; s('Всё, продам другому. Не звони.'); return 'gone'; }
+  s(pick(['Ты что, за такие деньги только ворота заберёшь.', 'Мало. Тут одних колёс на больше.'])); return 'no';
+}
+function buyLot(lot) {
+  if (!lot.deal || lot.gone) return 'Сначала договоритесь';
+  if (S.garage.length >= S.slots) return 'В гараже нет места';
+  if (!canPay(lot.deal)) return 'Не хватает денег';
+  pay(lot.deal);
+  S.garage.push({ car: lot.car, paid: lot.deal, spent: 0, boughtDay: S.day, sale: null, offers: [] });
+  S.lots = S.lots.filter(x => x !== lot);
+  S.stats.bought++;
+  addLog('Купил «' + LOT_TYPES[lot.type].n.toLowerCase() + '» за ' + money(lot.deal) + ', а там ' + carName(lot.car) + '.');
+  return null;
+}
+
+// ---------- пасхалка: семёрка Яна ----------
+function genYanListing() {
+  const m = MODELS.findIndex(x => x.brand === 'ВАЗ' && x.name === '2107');
+  const car = genCar();
+  Object.assign(car, { m, year: 2006, km: 187000, kmShown: 187000, owners: 3, ownersSaid: 3, acc: 0, accSaid: 0, taxi: false, taxiSaid: false,
+    wear: { engine: 14, gearbox: 18, suspension: 9, body: 6, electric: 22, interior: 12 }, declared: {}, legal: { zalog: 0, limit: 0, wanted: false },
+    tune: 1450000, photo: 'img/yan-2107.jpg', title: 'ВАЗ 2107 «Хамелеон»' });
+  return { id: S.nextId++, car, seller: SELLERS.findIndex(x => x.k === 'yan'), sname: 'Ян с приёмки', city: 'Санкт-Петербург', posted: S.day, expires: S.day + 7,
+    ask: 1200000, ask0: 1200000, floor: 980000, patience: 6, pointed: [], cash: false, deal: 0, called: false, gone: false, urgent: false, special: 'yan', chat: [],
+    text: 'Продаю свою ласточку. Хамелеон, неон, интеркулер наружу, бронзовые диски, расширители арок, низкая. Вложено больше, чем заработал на приёмке за год. ' +
+      'Не бита, гнила нет, всё по уму. Торг у капота, но как своему. Смотреть после смены на СЦ Волхонское.' };
+}
+
 function plural(n, a, b, c) { n = Math.abs(n) % 100; const d = n % 10; if (n > 10 && n < 20) return c; if (d > 1 && d < 5) return b; if (d === 1) return a; return c; }
-function carName(c) { const m = MODELS[c.m]; return m.brand + ' ' + m.name; }
+function carName(c) { const m = MODELS[c.m]; return c.title || m.brand + ' ' + m.name; }
 
 // ---------- сохранение: localStorage + облако Telegram ----------
 const SAVE_KEY = 'perekup_save_v1';
@@ -524,6 +605,8 @@ async function load() {
   const best = [local, cloud].filter(x => x && x.v === 1).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))[0];
   if (best) S = best; else newGame();
   if (!S.wh) S.wh = newWh();
+  if (!S.up) S.up = {};
+  if (!S.lots) { S.lots = []; refreshLots(); }
 }
 function resetGame() {
   try { localStorage.removeItem(SAVE_KEY); } catch (e) { }
